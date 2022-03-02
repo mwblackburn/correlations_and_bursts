@@ -15,12 +15,61 @@ from scipy.stats import pearsonr as pearson_correlation
 # construct and evaluate correlation statistics
 # save any relevant data for plots (so basically everything)
 
+# BRING UP: Refactor modality -> class (ie weights_by_modality -> weights_by_class)
+# BRING UP: Include functionality for decoder optimization -> Yes, port the optimization stuff over
+# BRING UP: Docstring format for dictionaries
+
+# For visualization: Either another class, or scripts for plotting
+# Script for running analysis and using the objects (part of both documentation and testing)
+# Make script for replicating shown analyses (also part of both documentation and testing)
+
 
 class SessionProcessor:
+    # Currently irrelevant documentation that was dificult to phrase, so I'm waiting to delete it
+    # until I'm certain I wont need it
+    #        The indices for the beginning of each region's unit ID numbers is held in
+    #    _all_unit_dividing_indicies
+    """One line summary of SessionProcessor
+    
+    More in depth description of SessionProcessor
+    
+    Methods
+    _______
+    construct_decoder(LIST_ALL_ARGS)
+        Description of construct_decoder
+    construct_psth(LIST_ALL_ARGS)
+        Description of construct_psth
+    etc.
+    
+    Attributes
+    __________
+    session : EcephysSession
+        The EcephysSession this processor navigates.
+    units_by_acronym : :obj:`dict` of :obj:`list` of :obj:`int`
+        Holds the unit ID numbers of every cell belonging to a specific region.
+        The region (acronym) is the key for the associated list of ID numbers.
+    all_units : :obj:`list` of :obj:`int`
+        The unit ID number of every cell in this session. all_units is sorted by
+        region, e.g. all 'VISp' units lie between all_units[i] and all_units[j].
+    
+    """
 
     # TODO: Doc me
 
     def __init__(self, session):
+        """Create a new SessionProcessor
+        
+        Note
+        ____
+        Maybe theres something to note?
+        
+        Parameters
+        __________
+        session : EcephysSession
+            The EcephysSession to be processed.
+        
+        """
+
         # Set the internal session and id number
         self.session = session
         self._session_id = self.session.ecephys_session_id
@@ -50,11 +99,12 @@ class SessionProcessor:
             self._all_unit_dividing_indices[acronym] = (start, stop)
 
         # Eventually this Processor is going to be decoding stimuli, so we'll need to store
-        # the decoders
+        # the decoders, PSTHs, and correlations
         self._decoders = {}
         self._histograms = {}
         self._modality_histograms = {}
         self._cell_correlations = {}
+        self._within_class_correlations = {}
 
         # TODO: Construct more variables as needed
         return
@@ -66,18 +116,34 @@ class SessionProcessor:
         self,
         stimulus_type,
         name="",
-        bin_start=0,
-        bin_stop=0,
+        bin_start=0.0,
+        bin_stop=0.0,
         bin_width=0.05,
         classifier=LinearSVC(),
-    ):
+        shuffle_trials=False,
+    ) -> None:
+        """Collects all the data needed to decode stimuli from the neural activity in self.session.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
         # If a name wasn't provided, name the decoder as explicitly as possible
         if name == "":
-            name = f"{stimulus_type}_width_{bin_width*1000}ms"
+            name_extension = "shuffled" if shuffle_trials else "unshuffled"
+            name = f"{stimulus_type}_width_{bin_width*1000}ms_{name_extension}"
 
         if name in self._decoders.keys():
             raise ValueError(
-                f"A decoder with the name {name}, already exists. This can happen if you have constructed a decoder with the same stimulus type and bin width."
+                f"A decoder with the name {name}, already exists. This can happen if you have constructed a decoder with the same stimulus_type, bin_width, and shuffle_trials."
             )
 
         # Get the stim info
@@ -87,10 +153,7 @@ class SessionProcessor:
         # Create the time bins
         bins = self._make_bins(bin_start, bin_stop, bin_width, stim_table)
 
-        # Collect the data
-        x = np.array(
-            self.session.presentationwise_spike_counts(bins, stim_ids, self.all_units)
-        )
+        # The labels to be predicted by the decoder
         y = np.array(stim_table[stimulus_type])
 
         # Change the null labels to a numerical value, so that the classifiers don't panic
@@ -98,6 +161,17 @@ class SessionProcessor:
             if y[idx] == "null":
                 y[idx] = -1.0
         stim_modalities = np.unique(y)
+
+        # Shuffle x if need be
+        if shuffle_trials:
+            # Shuffle trials within classes
+            x = self._shuffle_trials(bins, stim_ids, y, stim_modalities)
+        else:
+            # Collect the data
+            x = self.session.presentationwise_spike_counts(
+                bins, stim_ids, self.all_units
+            )
+        x = np.array(x)
 
         # Construct the decoder
         self._decoders[name] = Decoder(
@@ -110,13 +184,34 @@ class SessionProcessor:
             y,
             name=name,
         )
-        return  # TODO: This function may not be complete
+        return  # NOTE: This function may not be complete
 
     # Idea: Eventually what we want, is to pass a set of stim names, and return psths, weights,
     # correlations, etc for every stim
 
-    # Must be called after construct_decoder is called
+    # Must be called after construct_decoder is called.
+    # XXX: Maybe adjust it so that it gives a warning but constructs a default decoder
+    # with the name that was passed as an argument?
+    # BRING UP: There is a lot of redundant code here that could easily be combined with
+    # the code in "construct decoder." The easiest thing to do would be to modify this
+    # function to be private, and pass the relevant arguments to this function and
+    # construct the psths. You could then pretty easily associate a set of psths with
+    # a specific decoder
     def construct_psth(self, name):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object. You must call SessionProcessor.construct_decoders(args) before constructing PSTHs."
@@ -151,7 +246,23 @@ class SessionProcessor:
         self._modality_histograms[name] = modality_histograms
         return  # TODO: This function may not be complete
 
+    # BRING UP: This also might be overly redundant, why not just call it immediately after
+    # construct_decoder(args) is called?
     def calculate_decoder_weights(self, name):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
         # Check that the decoder exists, unpack it's information
         if not name in self._decoders.keys():
             raise ValueError(
@@ -218,9 +329,23 @@ class SessionProcessor:
             weights_by_bin, weights_by_modality, weights_by_cell
         )
 
-        return  # TODO: This function may not be complete
+        return  # NOTE: This function may not be complete
 
     def calculate_correlations(self, name):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
@@ -259,28 +384,135 @@ class SessionProcessor:
                 )
 
         cell_correlation_matrices = {}
+        within_class_correlations = {}
         cell_idx = 0
         for cell_id in self.all_units:
             cell_weights = weights_by_cell[cell_id]
             # Get the psth for the current cell for each modality (arr: (num_bins, num_modalities))
             cell_histograms = self._organize_histograms(modality_histograms, cell_idx)
-            cell_correlation_matrices[cell_id] = self._correlate_by_cell(
-                cell_weights, cell_histograms
-            )
+            (
+                cell_correlation_matrices[cell_id],
+                within_class_correlations[cell_id],
+            ) = self._correlate_by_cell(cell_weights, cell_histograms)
             cell_idx += 1
-        # TODO: Calculate the diagonals and save them
         self._cell_correlations[name] = cell_correlation_matrices
+        self._within_class_correlations[name] = within_class_correlations
+        # TODO: Histogram the diagonals in bulk and by region
         return
 
-    def trial_shuffle(self):
-        # Currently this function is here as a placeholder for potentially multiple functions
-        # related to trial shuffling
-        pass
+    # (bins, stim_ids, y, stim_modalities)
+    def _shuffle_trials(self, bin_edges, stim_ids, stim_presentations, stim_classes):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
+        # Create the data to be shuffled
+        psths = self.session.presentationwise_spike_counts(
+            bin_edges, stim_ids, self.all_units
+        )
+        num_presentations, num_bins, num_units = psths.shape
+
+        # Sort all the stimulus presentation ids by class so that trials are shuffled with
+        # the correct labels
+        presentations_by_class = {}
+        for stim_class in stim_classes:
+            class_presentation_indicies = []
+            for k in range(num_presentations):
+                if stim_class == stim_presentations[k]:
+                    class_presentation_indicies = class_presentation_indicies + [k]
+            presentations_by_class[stim_class] = class_presentation_indicies
+
+        # Picture a psth set that is num_bins x num_units. That is the psth set for a particular
+        # stimulus presentation. I'm going to refer to that as the "current slice."
+        # There is a stack of these slices. A slice has an associated stimulus presentation in
+        # stim_presentations, which allows us to group the indices of the slices by presentation
+        # class, e.g. given classes A and B, all the slice indices for class A are grouped and
+        # all the slice indicies for class B are grouped. I'll refer to the class grouped stacks
+        # as "substacks."
+        # We're taking the current slice, and looping through every entry in it.
+        # At the [m,n]th entry in the slice, we pull a random [m,n]th entry from the associated
+        # substack and swap them.
+        for presentation_idx in range(num_presentations):
+            # current_presentation = psths[presentation_idx, :, :]
+            current_class = stim_presentations[presentation_idx]
+
+            # This is the substack I refer to above
+            current_class_indices = presentations_by_class[current_class]
+            num_class_presentations = len(current_class_indices)
+
+            # We're going to need to swap (num_bins*num_units) entries.
+            # This is a matrix of random indicies for the substack
+            swapping_partner_indices = np.random.random_integers(
+                0, num_class_presentations - 1, (num_bins, num_units)
+            )
+
+            for bin_idx in range(num_bins):
+                for unit_idx in range(num_units):
+                    # swapping_partner_indices[bin_idx, unit_idx] -> the index of the random
+                    # [m,n]th entry in the substack. Name it IDX
+                    # current_class_indices[IDX] -> the index of the random [m,n]th entry in
+                    # the entire whole stack
+                    # -> swapping_partner_idx is a random index of the same class as the
+                    # current class
+                    swapping_partner_idx = current_class_indices[
+                        swapping_partner_indices[bin_idx, unit_idx]
+                    ]
+
+                    # Hold the value at the current slice
+                    switch_bag = psths[presentation_idx, bin_idx, unit_idx]
+
+                    # Replace the value at the current slice with the value at the random index
+                    psths[presentation_idx, bin_idx, unit_idx] = psths[
+                        swapping_partner_idx, bin_idx, unit_idx
+                    ]
+
+                    # Replace the value at the random index with the value at the current slice
+                    psths[swapping_partner_idx, bin_idx, unit_idx] = switch_bag
+
+        return psths
 
     def save(self, path=""):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
         pass
 
     def _correlate(self, x1, x2):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
         # warnings.filterwarnings('ignore')
 
         correlations = np.zeros(x1.shape[0])
@@ -291,6 +523,20 @@ class SessionProcessor:
         return np.nanmean(correlations)
 
     def _organize_histograms(self, histograms, cell_idx):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
         keys = histograms.keys()
         num_bins = histograms[keys[0]].shape[0]
 
@@ -307,6 +553,20 @@ class SessionProcessor:
 
     # modality_histograms here is a 2D array, where rows are bins, and columns are modalities for a specific cell
     def _correlate_by_cell(self, cell_weights, modality_histograms):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
         num_modalities = modality_histograms.shape[1]
         cell_correlations = np.zeros((num_modalities, num_modalities))
 
@@ -325,14 +585,48 @@ class SessionProcessor:
                     current_correlation if current_correlation is not np.nan else 0
                 )
 
-        return cell_correlations
+        # Pull average diagonal (within class correlations)
+        diagonal = 0.0
+        for k in range(num_modalities):
+            diagonal = diagonal + cell_correlations[k, k]
+        diagonal = diagonal / num_modalities
+
+        return cell_correlations, diagonal
 
     def _make_bins(self, bin_stop, bin_start, bin_width, stim_table):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
         if bin_stop == 0:
             bin_stop = stim_table.duration.mean() + bin_width
-        return np.arrange(bin_start, bin_stop, bin_width)
+        return np.arange(bin_start, bin_stop, bin_width)
 
     def _sort_by_modality(self, stim_modalities, stim_presentations, stim_ids):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
         indicies = {}
         num_presentations = len(stim_presentations)
         if not len(stim_ids) == num_presentations:
@@ -347,7 +641,7 @@ class SessionProcessor:
             for presentation in range(num_presentations):
                 if stim_presentations[presentation] == float(stim):
                     currentIDs = currentIDs + [stim_ids[presentation]]
-                # FIXME: There may be a bug here with the datatype of the stimulus
+                # NOTE: There may be a bug here with the datatype of the stimulus
                 # If it becomes an issue, pull the presentation type and cast the
                 # stim to that type
             indicies[stim] = currentIDs
@@ -356,6 +650,20 @@ class SessionProcessor:
 
     # Initializes a dictionary full of empty arrays
     def _initialize_dict(self, keys, array_size):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
         empty_dict = {}
         for key in keys:
             empty_dict[key] = np.zeros(array_size)

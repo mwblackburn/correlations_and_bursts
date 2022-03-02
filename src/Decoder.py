@@ -6,6 +6,39 @@ import copy
 
 
 class Decoder:
+    """One line summary of Decoder
+    
+    More in depth description of Decoder
+    
+    Methods
+    _______
+    
+    
+    Attributes
+    __________
+    classifier : 
+    
+    stimulus_type : 
+    
+    stim_table : 
+    
+    stim_modalities : 
+    
+    bin_edges : 
+    
+    x : 
+    
+    y : 
+    
+    name : 
+    
+    weights_by_bin : 
+    
+    weights_by_modality : 
+    
+    weights_by_cell : 
+    
+    """
 
     # TODO: Doc me
 
@@ -20,6 +53,17 @@ class Decoder:
         y,
         name="",
     ) -> None:
+        """Create a new Decoder
+        
+        Note
+        ____
+        Maybe theres something to note?
+        
+        Parameters
+        __________
+        
+        
+        """
         self.classifier = classifier
         self.stimulus_type = stimulus_type
         self.stim_table = stim_table
@@ -35,9 +79,37 @@ class Decoder:
         self.weights_by_cell = None
 
     def get_stimulus_type(self):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
         return self.stimulus_type
 
     def unpack(self):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
         return (
             self.classifier,
             self.stimulus_type,
@@ -49,11 +121,39 @@ class Decoder:
         )
 
     def unpack_weights(self):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
         if not self.has_weights():
             raise ValueError(f"{self.name} has no weights.")
         return (self.weights_by_bin, self.weights_by_modality, self.weights_by_cell)
 
     def add_weights(self, weights_by_bin, weights_by_modality, weights_by_cell) -> None:
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
         self.weights_by_bin = weights_by_bin
         self.weights_by_modality = weights_by_modality
         self.weights_by_cell = weights_by_cell
@@ -61,4 +161,18 @@ class Decoder:
 
     # To check whether this Decoder has been run
     def has_weights(self) -> bool:
-        return not self.weights_by_bin is None
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
+        return self.weights_by_bin is not None
