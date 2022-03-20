@@ -1,7 +1,9 @@
 import numpy as np
+from numpy.random import default_rng
 
-# import warnings
+import warnings
 from sklearn.svm import LinearSVC
+from sklearn import metrics
 from src.Decoder import Decoder
 from scipy.stats import pearsonr as pearson_correlation
 
@@ -105,16 +107,18 @@ class SessionProcessor:
         self._modality_histograms = {}
         self._cell_correlations = {}
         self._within_class_correlations = {}
+        self._results = None
 
         # TODO: Construct more variables as needed
         return
 
     # In theory, you could cause a bug here by calling this twice, with the same stim and bin
-    # bin width, but different start and stop times. Right now, this issue is addressed with
-    # an exception (ValueError)
+    # width, but different start and stop times. Right now, this issue is addressed with an
+    # exception (ValueError)
     def construct_decoder(
         self,
         stimulus_type,
+        stimulus_characteristic,
         name="",
         bin_start=0.0,
         bin_stop=0.0,
@@ -139,7 +143,7 @@ class SessionProcessor:
         # If a name wasn't provided, name the decoder as explicitly as possible
         if name == "":
             name_extension = "shuffled" if shuffle_trials else "unshuffled"
-            name = f"{stimulus_type}_width_{bin_width*1000}ms_{name_extension}"
+            name = f"{stimulus_type}__width_{bin_width*1000}ms__{name_extension}"
 
         if name in self._decoders.keys():
             raise ValueError(
@@ -154,7 +158,7 @@ class SessionProcessor:
         bins = self._make_bins(bin_start, bin_stop, bin_width, stim_table)
 
         # The labels to be predicted by the decoder
-        y = np.array(stim_table[stimulus_type])
+        y = np.array(stim_table[stimulus_characteristic])
 
         # Change the null labels to a numerical value, so that the classifiers don't panic
         for idx in range(len(y)):
@@ -184,7 +188,7 @@ class SessionProcessor:
             y,
             name=name,
         )
-        return  # NOTE: This function may not be complete
+        return name  # NOTE: This function may not be complete
 
     # Idea: Eventually what we want, is to pass a set of stim names, and return psths, weights,
     # correlations, etc for every stim
@@ -282,22 +286,25 @@ class SessionProcessor:
 
         # Get data information
         num_presentations, num_bins, num_units = x.shape
-        yTrue = y.astype(int)
+        y_true = y.astype(int)
 
         # Initialize everything
         weights_by_modality = self._initialize_dict(
             stim_modalities, (num_bins, num_units)
         )
+        weights_by_cell = self._initialize_dict(
+            self.all_units, (num_bins, len(stim_modalities))
+        )
         weights_by_bin = {}
-        weights_by_cell = {}
+        accuracies_by_bin = {}
 
         # Train the classifier by bin, then store the resulting weights
         for bin in range(num_bins):
             # Get the data for the current time bin
-            xBin = x[:, bin, :]
+            x_bin = x[:, bin, :]
 
             # Train the classifier
-            classifier.fit(xBin, yTrue)
+            classifier.fit(x_bin, y_true)
 
             # Store the weights, and the classes.
             # The classes must be stored so that the correct set of
@@ -305,6 +312,14 @@ class SessionProcessor:
             bin_weights = classifier.coef_
             classes = classifier.classes_
             weights_by_bin[bin] = bin_weights
+            
+            # FIXME: This needs to be more thoroughly explored (probably with this function isolated to
+            # a .ipynb). The accuracies are always 100%. That is clearly wrong. I'm pretty sure it has
+            # something to do with the scorer itself (I'm fairly confident the classifier is training
+            # correctly, so the only other place to look is the scoring function itself)
+            # Try using the cross_val_score function:
+            # cross_val_score(classifier, x_bin, y_true, cv=cv_count, scoring=make_scorer(accuracy_score))
+            accuracies_by_bin[bin] = metrics.precision_score(y_true, classifier.predict(x_bin), average='micro')#classifier.score(x_bin, y_true)
 
             # Store the weights, sorted by modality
             idx = 0
@@ -326,7 +341,7 @@ class SessionProcessor:
             unit_idx += 1
 
         self._decoders[name].add_weights(
-            weights_by_bin, weights_by_modality, weights_by_cell
+            weights_by_bin, weights_by_modality, weights_by_cell, accuracies_by_bin
         )
 
         return  # NOTE: This function may not be complete
@@ -382,9 +397,9 @@ class SessionProcessor:
                         dim="stimulus_presentation_id"
                     )
                 )
-
-        cell_correlation_matrices = {}
-        within_class_correlations = {}
+        warnings.filterwarnings("ignore")
+        cell_correlation_matrices = {} # The weight/activity correlation matrices by class
+        within_class_correlations = {} # The mean of the diagonals of the above matrices
         cell_idx = 0
         for cell_id in self.all_units:
             cell_weights = weights_by_cell[cell_id]
@@ -397,90 +412,10 @@ class SessionProcessor:
             cell_idx += 1
         self._cell_correlations[name] = cell_correlation_matrices
         self._within_class_correlations[name] = within_class_correlations
+        warnings.filterwarnings("default")
         # TODO: Histogram the diagonals in bulk and by region
         return
-
-    # (bins, stim_ids, y, stim_modalities)
-    def _shuffle_trials(self, bin_edges, stim_ids, stim_presentations, stim_classes):
-        """Brief summary of what this function does.
-        
-        Note
-        ____
-        There's probably something to note here
-        
-        Parameters
-        __________
-        
-        
-        Returns
-        _______
-        
-        """
-        # Create the data to be shuffled
-        psths = self.session.presentationwise_spike_counts(
-            bin_edges, stim_ids, self.all_units
-        )
-        num_presentations, num_bins, num_units = psths.shape
-
-        # Sort all the stimulus presentation ids by class so that trials are shuffled with
-        # the correct labels
-        presentations_by_class = {}
-        for stim_class in stim_classes:
-            class_presentation_indicies = []
-            for k in range(num_presentations):
-                if stim_class == stim_presentations[k]:
-                    class_presentation_indicies = class_presentation_indicies + [k]
-            presentations_by_class[stim_class] = class_presentation_indicies
-
-        # Picture a psth set that is num_bins x num_units. That is the psth set for a particular
-        # stimulus presentation. I'm going to refer to that as the "current slice."
-        # There is a stack of these slices. A slice has an associated stimulus presentation in
-        # stim_presentations, which allows us to group the indices of the slices by presentation
-        # class, e.g. given classes A and B, all the slice indices for class A are grouped and
-        # all the slice indicies for class B are grouped. I'll refer to the class grouped stacks
-        # as "substacks."
-        # We're taking the current slice, and looping through every entry in it.
-        # At the [m,n]th entry in the slice, we pull a random [m,n]th entry from the associated
-        # substack and swap them.
-        for presentation_idx in range(num_presentations):
-            # current_presentation = psths[presentation_idx, :, :]
-            current_class = stim_presentations[presentation_idx]
-
-            # This is the substack I refer to above
-            current_class_indices = presentations_by_class[current_class]
-            num_class_presentations = len(current_class_indices)
-
-            # We're going to need to swap (num_bins*num_units) entries.
-            # This is a matrix of random indicies for the substack
-            swapping_partner_indices = np.random.random_integers(
-                0, num_class_presentations - 1, (num_bins, num_units)
-            )
-
-            for bin_idx in range(num_bins):
-                for unit_idx in range(num_units):
-                    # swapping_partner_indices[bin_idx, unit_idx] -> the index of the random
-                    # [m,n]th entry in the substack. Name it IDX
-                    # current_class_indices[IDX] -> the index of the random [m,n]th entry in
-                    # the entire whole stack
-                    # -> swapping_partner_idx is a random index of the same class as the
-                    # current class
-                    swapping_partner_idx = current_class_indices[
-                        swapping_partner_indices[bin_idx, unit_idx]
-                    ]
-
-                    # Hold the value at the current slice
-                    switch_bag = psths[presentation_idx, bin_idx, unit_idx]
-
-                    # Replace the value at the current slice with the value at the random index
-                    psths[presentation_idx, bin_idx, unit_idx] = psths[
-                        swapping_partner_idx, bin_idx, unit_idx
-                    ]
-
-                    # Replace the value at the random index with the value at the current slice
-                    psths[swapping_partner_idx, bin_idx, unit_idx] = switch_bag
-
-        return psths
-
+    
     def save(self, path=""):
         """Brief summary of what this function does.
         
@@ -497,6 +432,164 @@ class SessionProcessor:
         
         """
         pass
+    
+    def results(self):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
+        # TODO: There will be other things that need checking (make sure proper calls have been made, etc.)
+        #if self._results is not None:
+        #    return self._results
+
+        #self._decoders = {}
+        #self._histograms = {}
+        #self._modality_histograms = {}
+        #self._cell_correlations = {}
+        #self._within_class_correlations = {}
+        names = self._decoders.keys()
+        results = {}
+        for name in names:
+            name_results = {}
+            name_results["decoder"] = self._decoders[name]
+            #name_results["decoder_accuracy_by_bin"] = ?
+            name_results["psths"] = self._histograms[name]
+            name_results["class_psths"] = self._modality_histograms[name]
+            name_results["cell_correlation_matrices"] = self._cell_correlations[name]
+            name_results["within_class_correlations"] = self._within_class_correlations[name]
+            results[name] = name_results
+        
+        self._results = results
+        return results
+
+    # (bins, stim_ids, y, stim_modalities)
+    def _shuffle_trials(self, bin_edges, stim_ids, stim_presentation_order, stim_classes):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
+        rng = default_rng()
+        num_bins = len(bin_edges)-1
+        num_presentations = len(stim_presentation_order)
+        num_units = len(self.all_units)
+        
+        # Sort all the stimulus presentation ids by class so that trials are shuffled with
+        # the correct labels
+        presentations_by_class = {}
+        counts = {}
+        for stim_class in stim_classes: # For each class of stimulus (e.g. each presentation angle)
+            class_presentation_indicies = []
+            counts[stim_class] = 0 # Used later when collecting shuffled presentations in order
+            # Collect the indicies for each presentation of that class
+            for k in range(num_presentations):
+                if stim_class == stim_presentation_order[k]:
+                    class_presentation_indicies = class_presentation_indicies + [k]
+            # presentations_by_class[stim_class] = class_presentation_indicies
+            # The psths for every presentation for every cell, sorted by stimulus
+            presentations_by_class[stim_class] = np.array(self.session.presentationwise_spike_counts(bin_edges, stim_ids[class_presentation_indicies], self.all_units))
+        
+        # PSTHS: (num_presentations, num_bins, num_units)
+        # We want to loop through each bin -> current_bin: (num_presentations, num_units)
+        # Shuffle each column of current_bin (keeps units' responses within unit, but outside of trial)
+        for stim_class in stim_classes:
+            current_class_psth = presentations_by_class[stim_class]
+            for bin_idx in range(num_bins):
+                rng.shuffle(current_class_psth[:,bin_idx,:], axis=1)
+                #current_bin = current_class_psth[:,bin_idx,:]
+                # Shuffle the current bin column wise
+                #current_class_psth[:,bin_idx,:] = rng.shuffle(current_bin, axis=1)
+                
+        # Now all the stimulus presentations are shuffled within class, and we need to collect them
+        # all into one array (with the original class presentation ordering given by 
+        # stim_presentation_order)
+        presentation_idx = 0
+        psths = np.zeros((num_presentations, num_bins, num_units))
+        for presentation_class in stim_presentation_order:
+            # Get the psth stack for this class
+            current_class_psth = presentations_by_class[presentation_class]
+            # Get how many times we've seen this class before
+            current_class_count = counts[presentation_class]
+            # Add the next presentation to the all class psth stack
+            psths[presentation_idx] = current_class_psth[current_class_count]
+            
+            # Increment indices
+            counts[presentation_class] += 1
+            presentation_idx += 1
+        
+        # Create the data to be shuffled
+        # psths = self.session.presentationwise_spike_counts(
+        #     bin_edges, stim_ids, self.all_units
+        # )
+        # num_presentations, num_bins, num_units = psths.shape
+
+        # Picture a psth set that is num_bins x num_units. That is the psth set for a particular
+        # stimulus presentation. I'm going to refer to that as the "current slice."
+        # There is a stack of these slices. A slice has an associated stimulus presentation in
+        # stim_presentations, which allows us to group the indices of the slices by presentation
+        # class, e.g. given classes A and B, all the slice indices for class A are grouped and
+        # all the slice indicies for class B are grouped. I'll refer to the class grouped stacks
+        # as "substacks."
+        # We're taking the current slice, and looping through every entry in it.
+        # At the [m,n]th entry in the slice, we pull a random [m,n]th entry from the associated
+        # substack and swap them.
+        # for presentation_idx in range(num_presentations):
+        #     # current_presentation = psths[presentation_idx, :, :]
+        #     current_class = stim_presentation_order[presentation_idx]
+
+        #     # This is the substack I refer to above
+        #     current_class_indices = presentations_by_class[current_class]
+        #     num_class_presentations = len(current_class_indices)
+
+        #     # We're going to need to swap (num_bins*num_units) entries.
+        #     # This is a matrix of random indicies for the substack
+        #     swapping_partner_indices = np.random.random_integers(
+        #         0, num_class_presentations - 1, (num_bins, num_units)
+        #     )
+
+        #     for bin_idx in range(num_bins):
+        #         for unit_idx in range(num_units):
+        #             # swapping_partner_indices[bin_idx, unit_idx] -> the index of the random
+        #             # [m,n]th entry in the substack. Name it IDX
+        #             # current_class_indices[IDX] -> the index of the random [m,n]th entry in
+        #             # the entire whole stack
+        #             # -> swapping_partner_idx is a random index of the same class as the
+        #             # current class
+        #             swapping_partner_idx = current_class_indices[
+        #                 swapping_partner_indices[bin_idx, unit_idx]
+        #             ]
+
+        #             # Hold the value at the current slice
+        #             switch_bag = psths[presentation_idx, bin_idx, unit_idx]
+
+        #             # Replace the value at the current slice with the value at the random index
+        #             psths[presentation_idx, bin_idx, unit_idx] = psths[
+        #                 swapping_partner_idx, bin_idx, unit_idx
+        #             ]
+
+        #             # Replace the value at the random index with the value at the current slice
+        #             psths[swapping_partner_idx, bin_idx, unit_idx] = switch_bag
+
+        return psths
 
     def _correlate(self, x1, x2):
         """Brief summary of what this function does.
@@ -513,13 +606,13 @@ class SessionProcessor:
         _______
         
         """
-        # warnings.filterwarnings('ignore')
+        warnings.filterwarnings("ignore")
 
         correlations = np.zeros(x1.shape[0])
         for k in range(x1.shape[0]):
             correlations[k] = pearson_correlation(x1[k, :], x2)[0]
 
-        # warnings.filterwarnings('default')
+        warnings.filterwarnings("default")
         return np.nanmean(correlations)
 
     def _organize_histograms(self, histograms, cell_idx):
@@ -537,7 +630,7 @@ class SessionProcessor:
         _______
         
         """
-        keys = histograms.keys()
+        keys = list(histograms.keys())
         num_bins = histograms[keys[0]].shape[0]
 
         # Convert the dictionary of histograms to an array:
@@ -567,6 +660,7 @@ class SessionProcessor:
         _______
         
         """
+        
         num_modalities = modality_histograms.shape[1]
         cell_correlations = np.zeros((num_modalities, num_modalities))
 
@@ -580,7 +674,9 @@ class SessionProcessor:
             for col in range(num_modalities):
                 current_psth = modality_histograms[:, col]
                 # If warnings become an issue, change the pearson_correlation call to a self._correlate call
-                current_correlation = pearson_correlation(currentWeights, current_psth)
+                current_correlation = pearson_correlation(currentWeights, current_psth)[
+                    0
+                ]
                 cell_correlations[row, col] = (
                     current_correlation if current_correlation is not np.nan else 0
                 )

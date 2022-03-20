@@ -1,0 +1,31 @@
+BURST CODE INTEGRATION:
+To integrate the burst detection code, you need R with some pretty specific packages,
+and rpy2 (2.9.5). On my machine, it took some work to get rpy2 to function properly
+with R.
+1) Download R and Rstudio using anaconda. DO NOT INSTALL ANY R PACKAGES YET
+2) Download rpy2 using anaconda (https://anaconda.zendesk.com/hc/en-us/articles/360023857134-Setting-up-rpy2-on-Windows)
+
+3) In python, run:
+
+>>> import rpy2.rinterface
+>>> from rpy2.robjects.packages import importr
+>>> base = importr('base')
+>>> print(base._libPaths())
+
+    Only one path should show up, note it. I will refer to this path as PATH
+
+4) Open Rstudio as an administrator and run the commands in r_admin_setup_instructions.
+    The first command is .libPaths(). That should return multiple paths, including PATH.
+    If PATH isn't there, panic (but I'm fairly certain it will always be there).
+    Assuming PATH is there, now run the command .libPaths(PATH). That will set the
+    package installation library to the same library that python is looking in, allowing
+    you to install the packages needed in R to run the burst detection algorithms.
+
+Useful links if you're lost
+https://stackoverflow.com/questions/28367799/rpy2-not-finding-package
+https://statisticsglobe.com/get-and-set-directory-path-of-installed-packages-in-r
+https://www.rdocumentation.org/packages/utils/versions/3.6.2/topics/install.packages
+https://stackoverflow.com/questions/45316742/run-r-as-administrator
+
+Finally, the package refered to as "sjemea" is found here:
+https://github.com/sje30/sjemea

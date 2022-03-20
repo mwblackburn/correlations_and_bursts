@@ -77,6 +77,7 @@ class Decoder:
         self.weights_by_bin = None
         self.weights_by_modality = None
         self.weights_by_cell = None
+        self.accuracies_by_bin = None
 
     def get_stimulus_type(self):
         """Brief summary of what this function does.
@@ -139,7 +140,7 @@ class Decoder:
             raise ValueError(f"{self.name} has no weights.")
         return (self.weights_by_bin, self.weights_by_modality, self.weights_by_cell)
 
-    def add_weights(self, weights_by_bin, weights_by_modality, weights_by_cell) -> None:
+    def add_weights(self, weights_by_bin, weights_by_modality, weights_by_cell, accuracies_by_bin) -> None:
         """Brief summary of what this function does.
         
         Note
@@ -157,6 +158,7 @@ class Decoder:
         self.weights_by_bin = weights_by_bin
         self.weights_by_modality = weights_by_modality
         self.weights_by_cell = weights_by_cell
+        self.accuracies_by_bin = accuracies_by_bin
         return
 
     # To check whether this Decoder has been run

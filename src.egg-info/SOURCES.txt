@@ -1,5 +1,8 @@
 README.md
 setup.py
+src/Decoder.py
+src/SessionNavigator.py
+src/SessionProcessor.py
 src/__init__.py
 src.egg-info/PKG-INFO
 src.egg-info/SOURCES.txt
