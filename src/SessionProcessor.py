@@ -312,14 +312,16 @@ class SessionProcessor:
             bin_weights = classifier.coef_
             classes = classifier.classes_
             weights_by_bin[bin] = bin_weights
-            
+
             # FIXME: This needs to be more thoroughly explored (probably with this function isolated to
             # a .ipynb). The accuracies are always 100%. That is clearly wrong. I'm pretty sure it has
             # something to do with the scorer itself (I'm fairly confident the classifier is training
             # correctly, so the only other place to look is the scoring function itself)
             # Try using the cross_val_score function:
             # cross_val_score(classifier, x_bin, y_true, cv=cv_count, scoring=make_scorer(accuracy_score))
-            accuracies_by_bin[bin] = metrics.precision_score(y_true, classifier.predict(x_bin), average='micro')#classifier.score(x_bin, y_true)
+            accuracies_by_bin[bin] = metrics.precision_score(
+                y_true, classifier.predict(x_bin), average="micro"
+            )  # classifier.score(x_bin, y_true)
 
             # Store the weights, sorted by modality
             idx = 0
@@ -398,8 +400,12 @@ class SessionProcessor:
                     )
                 )
         warnings.filterwarnings("ignore")
-        cell_correlation_matrices = {} # The weight/activity correlation matrices by class
-        within_class_correlations = {} # The mean of the diagonals of the above matrices
+        cell_correlation_matrices = (
+            {}
+        )  # The weight/activity correlation matrices by class
+        within_class_correlations = (
+            {}
+        )  # The mean of the diagonals of the above matrices
         cell_idx = 0
         for cell_id in self.all_units:
             cell_weights = weights_by_cell[cell_id]
@@ -415,7 +421,7 @@ class SessionProcessor:
         warnings.filterwarnings("default")
         # TODO: Histogram the diagonals in bulk and by region
         return
-    
+
     def save(self, path=""):
         """Brief summary of what this function does.
         
@@ -432,7 +438,7 @@ class SessionProcessor:
         
         """
         pass
-    
+
     def results(self):
         """Brief summary of what this function does.
         
@@ -449,31 +455,35 @@ class SessionProcessor:
         
         """
         # TODO: There will be other things that need checking (make sure proper calls have been made, etc.)
-        #if self._results is not None:
+        # if self._results is not None:
         #    return self._results
 
-        #self._decoders = {}
-        #self._histograms = {}
-        #self._modality_histograms = {}
-        #self._cell_correlations = {}
-        #self._within_class_correlations = {}
+        # self._decoders = {}
+        # self._histograms = {}
+        # self._modality_histograms = {}
+        # self._cell_correlations = {}
+        # self._within_class_correlations = {}
         names = self._decoders.keys()
         results = {}
         for name in names:
             name_results = {}
             name_results["decoder"] = self._decoders[name]
-            #name_results["decoder_accuracy_by_bin"] = ?
+            # name_results["decoder_accuracy_by_bin"] = ?
             name_results["psths"] = self._histograms[name]
             name_results["class_psths"] = self._modality_histograms[name]
             name_results["cell_correlation_matrices"] = self._cell_correlations[name]
-            name_results["within_class_correlations"] = self._within_class_correlations[name]
+            name_results["within_class_correlations"] = self._within_class_correlations[
+                name
+            ]
             results[name] = name_results
-        
+
         self._results = results
         return results
 
     # (bins, stim_ids, y, stim_modalities)
-    def _shuffle_trials(self, bin_edges, stim_ids, stim_presentation_order, stim_classes):
+    def _shuffle_trials(
+        self, bin_edges, stim_ids, stim_presentation_order, stim_classes
+    ):
         """Brief summary of what this function does.
         
         Note
@@ -489,38 +499,46 @@ class SessionProcessor:
         
         """
         rng = default_rng()
-        num_bins = len(bin_edges)-1
+        num_bins = len(bin_edges) - 1
         num_presentations = len(stim_presentation_order)
         num_units = len(self.all_units)
-        
+
         # Sort all the stimulus presentation ids by class so that trials are shuffled with
         # the correct labels
         presentations_by_class = {}
         counts = {}
-        for stim_class in stim_classes: # For each class of stimulus (e.g. each presentation angle)
+        for (
+            stim_class
+        ) in stim_classes:  # For each class of stimulus (e.g. each presentation angle)
             class_presentation_indicies = []
-            counts[stim_class] = 0 # Used later when collecting shuffled presentations in order
+            counts[
+                stim_class
+            ] = 0  # Used later when collecting shuffled presentations in order
             # Collect the indicies for each presentation of that class
             for k in range(num_presentations):
                 if stim_class == stim_presentation_order[k]:
                     class_presentation_indicies = class_presentation_indicies + [k]
             # presentations_by_class[stim_class] = class_presentation_indicies
             # The psths for every presentation for every cell, sorted by stimulus
-            presentations_by_class[stim_class] = np.array(self.session.presentationwise_spike_counts(bin_edges, stim_ids[class_presentation_indicies], self.all_units))
-        
+            presentations_by_class[stim_class] = np.array(
+                self.session.presentationwise_spike_counts(
+                    bin_edges, stim_ids[class_presentation_indicies], self.all_units
+                )
+            )
+
         # PSTHS: (num_presentations, num_bins, num_units)
         # We want to loop through each bin -> current_bin: (num_presentations, num_units)
         # Shuffle each column of current_bin (keeps units' responses within unit, but outside of trial)
         for stim_class in stim_classes:
             current_class_psth = presentations_by_class[stim_class]
             for bin_idx in range(num_bins):
-                rng.shuffle(current_class_psth[:,bin_idx,:], axis=1)
-                #current_bin = current_class_psth[:,bin_idx,:]
+                rng.shuffle(current_class_psth[:, bin_idx, :], axis=1)
+                # current_bin = current_class_psth[:,bin_idx,:]
                 # Shuffle the current bin column wise
-                #current_class_psth[:,bin_idx,:] = rng.shuffle(current_bin, axis=1)
-                
+                # current_class_psth[:,bin_idx,:] = rng.shuffle(current_bin, axis=1)
+
         # Now all the stimulus presentations are shuffled within class, and we need to collect them
-        # all into one array (with the original class presentation ordering given by 
+        # all into one array (with the original class presentation ordering given by
         # stim_presentation_order)
         presentation_idx = 0
         psths = np.zeros((num_presentations, num_bins, num_units))
@@ -531,11 +549,11 @@ class SessionProcessor:
             current_class_count = counts[presentation_class]
             # Add the next presentation to the all class psth stack
             psths[presentation_idx] = current_class_psth[current_class_count]
-            
+
             # Increment indices
             counts[presentation_class] += 1
             presentation_idx += 1
-        
+
         # Create the data to be shuffled
         # psths = self.session.presentationwise_spike_counts(
         #     bin_edges, stim_ids, self.all_units
@@ -660,7 +678,7 @@ class SessionProcessor:
         _______
         
         """
-        
+
         num_modalities = modality_histograms.shape[1]
         cell_correlations = np.zeros((num_modalities, num_modalities))
 

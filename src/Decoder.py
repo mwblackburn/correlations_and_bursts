@@ -140,7 +140,9 @@ class Decoder:
             raise ValueError(f"{self.name} has no weights.")
         return (self.weights_by_bin, self.weights_by_modality, self.weights_by_cell)
 
-    def add_weights(self, weights_by_bin, weights_by_modality, weights_by_cell, accuracies_by_bin) -> None:
+    def add_weights(
+        self, weights_by_bin, weights_by_modality, weights_by_cell, accuracies_by_bin
+    ) -> None:
         """Brief summary of what this function does.
         
         Note
