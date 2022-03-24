@@ -109,7 +109,6 @@ class SessionProcessor:
         self._within_class_correlations = {}
         self._results = None
 
-        # TODO: Construct more variables as needed
         return
 
     # In theory, you could cause a bug here by calling this twice, with the same stim and bin

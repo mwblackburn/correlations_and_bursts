@@ -1,3 +1,4 @@
 *.egginfo
 data
 results
+.Rproj.user

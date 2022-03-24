@@ -26,6 +26,7 @@ https://stackoverflow.com/questions/28367799/rpy2-not-finding-package
 https://statisticsglobe.com/get-and-set-directory-path-of-installed-packages-in-r
 https://www.rdocumentation.org/packages/utils/versions/3.6.2/topics/install.packages
 https://stackoverflow.com/questions/45316742/run-r-as-administrator
+https://stackoverflow.com/questions/39347782/getting-segmentation-fault-core-dumped-error-while-importing-robjects-from-rpy2/53639407#53639407
 
 Finally, the package refered to as "sjemea" is found here:
 https://github.com/sje30/sjemea
