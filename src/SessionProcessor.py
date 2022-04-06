@@ -58,7 +58,7 @@ class SessionProcessor:
 
     # TODO: Doc me
 
-    def __init__(self, session):
+    def __init__(self, session, bursts=None):
         """Create a new SessionProcessor
         
         Note
