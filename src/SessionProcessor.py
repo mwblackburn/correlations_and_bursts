@@ -2,6 +2,7 @@ import numpy as np
 from numpy.random import default_rng
 
 import warnings
+from sklearn.model_selection import train_test_split
 from sklearn.svm import LinearSVC
 from sklearn import metrics
 from src.Decoder import Decoder
@@ -247,11 +248,11 @@ class SessionProcessor:
                 bins, modality_indicies[stim], self.all_units
             )
         self._modality_histograms[name] = modality_histograms
-        return  # TODO: This function may not be complete
+        return
 
     # BRING UP: This also might be overly redundant, why not just call it immediately after
     # construct_decoder(args) is called?
-    def calculate_decoder_weights(self, name):
+    def calculate_decoder_weights(self, name, test_size=0.2):
         """Brief summary of what this function does.
         
         Note
@@ -302,8 +303,11 @@ class SessionProcessor:
             # Get the data for the current time bin
             x_bin = x[:, bin, :]
 
+            # Split the data
+            x_train, x_test, y_train, y_test = train_test_split(x_bin, y_true, test_size=test_size)
+            
             # Train the classifier
-            classifier.fit(x_bin, y_true)
+            classifier.fit(x_train, y_train)
 
             # Store the weights, and the classes.
             # The classes must be stored so that the correct set of
@@ -319,7 +323,7 @@ class SessionProcessor:
             # Try using the cross_val_score function:
             # cross_val_score(classifier, x_bin, y_true, cv=cv_count, scoring=make_scorer(accuracy_score))
             accuracies_by_bin[bin] = metrics.precision_score(
-                y_true, classifier.predict(x_bin), average="micro"
+                y_test, classifier.predict(x_test), average="micro"
             )  # classifier.score(x_bin, y_true)
 
             # Store the weights, sorted by modality
@@ -345,7 +349,7 @@ class SessionProcessor:
             weights_by_bin, weights_by_modality, weights_by_cell, accuracies_by_bin
         )
 
-        return  # NOTE: This function may not be complete
+        return
 
     def calculate_correlations(self, name):
         """Brief summary of what this function does.
@@ -654,7 +658,6 @@ class SessionProcessor:
         # We're pulling a single cell's histograms, so the shape of the array should be (num_bins, num_modalities)
         return_histograms = np.zeros((num_bins, len(keys)))
 
-        # FIXME: This loop probably has a bug in it, most likely something to do with indexing
         k = 0
         for key in keys:
             return_histograms[:, k] = histograms[key][:, cell_idx]
