@@ -2,7 +2,8 @@ import numpy as np
 from numpy.random import default_rng
 
 import warnings
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics import accuracy_score, make_scorer
 from sklearn.svm import LinearSVC
 from sklearn import metrics
 from src.Decoder import Decoder
@@ -249,7 +250,7 @@ class SessionProcessor:
         self._modality_histograms[name] = modality_histograms
         return
 
-    def calculate_decoder_weights(self, name, test_size=0.2):
+    def calculate_decoder_weights(self, name, test_size=0.2, thorough_accuracy_scoring=False, cv_count=5):
         """Brief summary of what this function does.
         
         Note
@@ -281,6 +282,11 @@ class SessionProcessor:
             ) = self._decoders[name].unpack()
             stim_presentation_ids = stim_table.index.values
 
+        if thorough_accuracy_scoring:
+            thorough_accuracy_scores = {}
+        else:
+            thorough_accuracy_scores = None
+        
         # Get data information
         num_presentations, num_bins, num_units = x.shape
         y_true = y.astype(int)
@@ -317,6 +323,9 @@ class SessionProcessor:
                 y_test, classifier.predict(x_test), average="micro"
             )  # classifier.score(x_bin, y_true)
 
+            if thorough_accuracy_scoring:
+                thorough_accuracy_scores[bin] = cross_val_score(classifier, x_bin, y_true, cv=cv_count, scoring=make_scorer(accuracy_score))
+            
             # Store the weights, sorted by modality
             idx = 0
             for stim in classes:
@@ -337,10 +346,13 @@ class SessionProcessor:
             unit_idx += 1
 
         self._decoders[name].add_weights(
-            weights_by_bin, weights_by_modality, weights_by_cell, accuracies_by_bin
+            weights_by_bin, weights_by_modality, weights_by_cell, accuracies_by_bin, thorough_accuracy_scores
         )
 
-        return
+        if thorough_accuracy_scoring:
+            return thorough_accuracy_scores
+        else:
+            return accuracies_by_bin
 
     def calculate_correlations(self, name):
         """Brief summary of what this function does.
