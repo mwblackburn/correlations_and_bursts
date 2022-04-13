@@ -7,9 +7,8 @@ from sklearn.svm import LinearSVC
 from sklearn import metrics
 from src.Decoder import Decoder
 from scipy.stats import pearsonr as pearson_correlation
-
-
 # import allensdk.brain_observatory.ecephys.ecephys_session
+
 
 # This is where most of the calculations on a single session are going to be performed.
 # It will:
@@ -22,7 +21,7 @@ from scipy.stats import pearsonr as pearson_correlation
 # BRING UP: Include functionality for decoder optimization -> Yes, port the optimization stuff over
 # BRING UP: Docstring format for dictionaries
 
-# For visualization: Either another class, or scripts for plotting
+# For visualization: scripts for plotting
 # Script for running analysis and using the objects (part of both documentation and testing)
 # Make script for replicating shown analyses (also part of both documentation and testing)
 
@@ -175,7 +174,7 @@ class SessionProcessor:
             x = self.session.presentationwise_spike_counts(
                 bins, stim_ids, self.all_units
             )
-        x = np.array(x)
+            x = np.array(x)
 
         # Construct the decoder
         self._decoders[name] = Decoder(
@@ -250,8 +249,6 @@ class SessionProcessor:
         self._modality_histograms[name] = modality_histograms
         return
 
-    # BRING UP: This also might be overly redundant, why not just call it immediately after
-    # construct_decoder(args) is called?
     def calculate_decoder_weights(self, name, test_size=0.2):
         """Brief summary of what this function does.
         
@@ -316,12 +313,6 @@ class SessionProcessor:
             classes = classifier.classes_
             weights_by_bin[bin] = bin_weights
 
-            # FIXME: This needs to be more thoroughly explored (probably with this function isolated to
-            # a .ipynb). The accuracies are always 100%. That is clearly wrong. I'm pretty sure it has
-            # something to do with the scorer itself (I'm fairly confident the classifier is training
-            # correctly, so the only other place to look is the scoring function itself)
-            # Try using the cross_val_score function:
-            # cross_val_score(classifier, x_bin, y_true, cv=cv_count, scoring=make_scorer(accuracy_score))
             accuracies_by_bin[bin] = metrics.precision_score(
                 y_test, classifier.predict(x_test), average="micro"
             )  # classifier.score(x_bin, y_true)
@@ -422,8 +413,24 @@ class SessionProcessor:
         self._cell_correlations[name] = cell_correlation_matrices
         self._within_class_correlations[name] = within_class_correlations
         warnings.filterwarnings("default")
-        # TODO: Histogram the diagonals in bulk and by region
         return
+    
+    # TODO: Implement the below functions
+    # A nice sanity check is merging the burst and single spikes returns the original spike train
+    def add_bursts(self, path, name, shuffled=False):
+        pass
+    
+    def presentationwise_burst_count(self, name):
+        pass
+    
+    def presentationwise_burst_times(self, name):
+        pass
+    
+    def presentationwise_non_burst_count(self, name):
+        pass
+    
+    def presentationwise_non_burst_times(self, name):
+        pass
 
     def save(self, path=""):
         """Brief summary of what this function does.
@@ -501,6 +508,11 @@ class SessionProcessor:
         _______
         
         """
+        # Overall method:
+        # Isolate PSTHs by class (so collect all the responses to 45 degrees in one spot,
+        # 90 in another, etc). With the PSTHs isolated by class, shuffling them is easier
+        # because we then just have to loop through bins and units to shuffle.
+        
         rng = default_rng()
         num_bins = len(bin_edges) - 1
         num_presentations = len(stim_presentation_order)
@@ -535,7 +547,7 @@ class SessionProcessor:
         for stim_class in stim_classes:
             current_class_psth = presentations_by_class[stim_class]
             for bin_idx in range(num_bins):
-                rng.shuffle(current_class_psth[:, bin_idx, :], axis=1)
+                rng.shuffle(current_class_psth[:, bin_idx, :], axis=0)
                 # current_bin = current_class_psth[:,bin_idx,:]
                 # Shuffle the current bin column wise
                 # current_class_psth[:,bin_idx,:] = rng.shuffle(current_bin, axis=1)
