@@ -1,13 +1,19 @@
 import numpy as np
 from numpy.random import default_rng
+import xarray
+
+import pickle as pkl
 
 import warnings
+
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import accuracy_score, make_scorer
 from sklearn.svm import LinearSVC
 from sklearn import metrics
-from src.Decoder import Decoder
 from scipy.stats import pearsonr as pearson_correlation
+
+from src.Decoder import Decoder
+
 # import allensdk.brain_observatory.ecephys.ecephys_session
 
 
@@ -427,12 +433,60 @@ class SessionProcessor:
         warnings.filterwarnings("default")
         return
     
+    def add_bursts(self, path, name, shuffled=False):
+        
+        if not name in self._decoders.keys():
+            raise ValueError(
+                f"{name} did not match the name of any decoders constructed by this object."
+            )
+
+        # The burst file in `path` is a dictionary with unit ids as keys, and the whole burst
+        # train for the particular stimulus epoch.
+        
+        with open(path, 'rb') as f:
+            burst_dict = pkl.load(path)
+        
+        if shuffled:
+            rng = default_rng()
+            stim_presentation_ids = list(burst_dict["stimulus_presentation_ids"])
+            burst_dict["stimulus_presentation_ids"] = rng.shuffle(stim_presentation_ids)
+        
+        self._decoders[name].add_bursts(burst_dict)
+        
+        return
+    
     # TODO: Implement the below functions
     # A nice sanity check is merging the burst and single spikes returns the original spike train
-    def add_bursts(self, path, name, shuffled=False):
-        pass
-    
     def presentationwise_burst_count(self, name):
+        
+        if not name in self._decoders.keys():
+            raise ValueError(
+                f"{name} did not match the name of any decoders constructed by this object."
+            )
+        elif not self._decoders[name].has_bursts():
+            raise ValueError(f"{name} does not have any bursts to count.")
+        else:
+            (
+                classifier,
+                stimulus_type,
+                stim_table,
+                stim_modalities,
+                bins,
+                x,
+                y,
+            ) = self._decoders[name].unpack()
+            stim_presentation_ids = stim_table.index.values
+            burst_dict = self._decoders[name].whole_burst_dict
+            num_presentations, num_bins, num_units = x.shape
+
+        # Want: an array with shape (num_presentations, num_bins, num_units)
+        presentationwise_counts = np.zeros((num_presentations, num_bins, num_units))
+        
+        # for each unit get burst start times, stop times, and presentation id
+        # for each presentation id, count how many start/stop pairs lie between the bin edges
+        #for unit_id, bursts in burst_dict.items():
+            
+        
         pass
     
     def presentationwise_burst_times(self, name):
