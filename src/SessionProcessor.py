@@ -1,8 +1,7 @@
 import numpy as np
+import pandas as pd
 from numpy.random import default_rng
 import xarray
-
-import pickle as pkl
 
 import warnings
 
@@ -256,7 +255,9 @@ class SessionProcessor:
         self._modality_histograms[name] = modality_histograms
         return
 
-    def calculate_decoder_weights(self, name, test_size=0.2, thorough_accuracy_scoring=False, cv_count=5):
+    def calculate_decoder_weights(
+        self, name, test_size=0.2, thorough_accuracy_scoring=False, cv_count=5
+    ):
         """Brief summary of what this function does.
         
         Note
@@ -292,7 +293,7 @@ class SessionProcessor:
             thorough_accuracy_scores = {}
         else:
             thorough_accuracy_scores = None
-        
+
         # Get data information
         num_presentations, num_bins, num_units = x.shape
         y_true = y.astype(int)
@@ -313,8 +314,10 @@ class SessionProcessor:
             x_bin = x[:, bin, :]
 
             # Split the data
-            x_train, x_test, y_train, y_test = train_test_split(x_bin, y_true, test_size=test_size)
-            
+            x_train, x_test, y_train, y_test = train_test_split(
+                x_bin, y_true, test_size=test_size
+            )
+
             # Train the classifier
             classifier.fit(x_train, y_train)
 
@@ -330,8 +333,14 @@ class SessionProcessor:
             )  # classifier.score(x_bin, y_true)
 
             if thorough_accuracy_scoring:
-                thorough_accuracy_scores[bin] = cross_val_score(classifier, x_bin, y_true, cv=cv_count, scoring=make_scorer(accuracy_score))
-            
+                thorough_accuracy_scores[bin] = cross_val_score(
+                    classifier,
+                    x_bin,
+                    y_true,
+                    cv=cv_count,
+                    scoring=make_scorer(accuracy_score),
+                )
+
             # Store the weights, sorted by modality
             idx = 0
             for stim in classes:
@@ -352,7 +361,11 @@ class SessionProcessor:
             unit_idx += 1
 
         self._decoders[name].add_weights(
-            weights_by_bin, weights_by_modality, weights_by_cell, accuracies_by_bin, thorough_accuracy_scores
+            weights_by_bin,
+            weights_by_modality,
+            weights_by_cell,
+            accuracies_by_bin,
+            thorough_accuracy_scores,
         )
 
         if thorough_accuracy_scoring:
@@ -432,33 +445,30 @@ class SessionProcessor:
         self._within_class_correlations[name] = within_class_correlations
         warnings.filterwarnings("default")
         return
-    
-    def add_bursts(self, path, name, shuffled=False):
-        
+
+    def add_bursts(self, burst_dict, name, shuffled=False):
+
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
             )
 
-        # The burst file in `path` is a dictionary with unit ids as keys, and the whole burst
+        # burst_dict is a dictionary with unit ids as keys, and the whole burst
         # train for the particular stimulus epoch.
-        
-        with open(path, 'rb') as f:
-            burst_dict = pkl.load(path)
-        
         if shuffled:
             rng = default_rng()
             stim_presentation_ids = list(burst_dict["stimulus_presentation_ids"])
             burst_dict["stimulus_presentation_ids"] = rng.shuffle(stim_presentation_ids)
-        
+
         self._decoders[name].add_bursts(burst_dict)
-        
+
         return
-    
+
     # TODO: Implement the below functions
     # A nice sanity check is merging the burst and single spikes returns the original spike train
     def presentationwise_burst_count(self, name):
-        
+        # TODO: Clarify in the documentation for this function, that a burst might straddle bin edges,
+        # so bursts are considered to be inside the bin they start in
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
@@ -476,25 +486,125 @@ class SessionProcessor:
                 y,
             ) = self._decoders[name].unpack()
             stim_presentation_ids = stim_table.index.values
+            stim_presentation_id_offset = int(stim_presentation_ids[0])
+            # stim_presentation_indices = stim_presentation_ids - stim_presentation_ids[0]
             burst_dict = self._decoders[name].whole_burst_dict
             num_presentations, num_bins, num_units = x.shape
 
         # Want: an array with shape (num_presentations, num_bins, num_units)
         presentationwise_counts = np.zeros((num_presentations, num_bins, num_units))
-        
-        # for each unit get burst start times, stop times, and presentation id
-        # for each presentation id, count how many start/stop pairs lie between the bin edges
-        #for unit_id, bursts in burst_dict.items():
-            
-        
-        pass
-    
-    def presentationwise_burst_times(self, name):
-        pass
-    
+
+        # Walk through each bin, and check if any of the beg times are in it. If they are,
+        # presentationwise_counts[presentation_id, bin_num, unit_id] += 1
+        unit_idx = 0
+        for unit_id, bursts in burst_dict.items():
+            if bursts is not None:
+                # Initialize the "next bin" to be the first bin
+                next_bin = bins[0]
+                for bin_idx in range(1, num_bins):
+                    # Set the current bin, and next bin
+                    current_bin = next_bin
+                    next_bin = bins[bin_idx]
+
+                    # Get all the bursts that lie between the current and next bin edge
+                    binned_bursts = bursts.loc[(bursts["relative_beg_time"] < next_bin)]
+                    binned_bursts = binned_bursts.loc[
+                        (binned_bursts["relative_beg_time"] >= current_bin)
+                    ]
+
+                    # Count how many bursts were in this bin
+                    for presentation_id in binned_bursts["stimulus_presentation_id"]:
+                        # The presentation ID may not index from 0, so we force it to by
+                        # subtracting the smallest presentation_id
+                        presentation_idx = int(
+                            presentation_id - stim_presentation_id_offset
+                        )
+
+                        # Count how many bursts occured for this presentation, in this bin,
+                        # with this unit
+                        presentationwise_counts[
+                            presentation_idx, bin_idx - 1, unit_idx
+                        ] += 1
+
+            unit_idx += 1
+
+        # Should return: xarray with label 'spike counts,' 'stimulus_presentation_id',
+        # 'time_relative_to_stimulus_onset', and 'unit_id'
+        return xarray.DataArray(
+            data=presentationwise_counts,
+            dims=[
+                "stimulus_presentation_id",
+                "time_relative_to_stimulus_onset",
+                "unit_id",
+            ],
+            name="burst_counts",
+        )
+
+    def presentationwise_burst_times(self, name):  # , time_reference='both'):
+        if not name in self._decoders.keys():
+            raise ValueError(
+                f"{name} did not match the name of any decoders constructed by this object."
+            )
+        elif not self._decoders[name].has_bursts():
+            raise ValueError(f"{name} does not have any bursts to count.")
+        else:
+            (
+                classifier,
+                stimulus_type,
+                stim_table,
+                stim_modalities,
+                bins,
+                x,
+                y,
+            ) = self._decoders[name].unpack()
+            # stim_presentation_ids = stim_table.index.values
+            # stim_presentation_id_offset = int(stim_presentation_ids[0])
+            # stim_presentation_indices = stim_presentation_ids - stim_presentation_ids[0]
+            burst_dict = self._decoders[name].whole_burst_dict
+            num_presentations, num_bins, num_units = x.shape
+
+        presentationwise_times = pd.DataFrame(
+            {
+                "absolute_beg_time": [],
+                "absolute_end_time": [],
+                "relative_beg_time": [],
+                "relative_end_time": [],
+                "stimulus_presentation_id": [],
+                "unit_id": [],
+            }
+        )
+        for unit_id, bursts in burst_dict.items():
+            if bursts is not None:
+                abs_beg_times = bursts["absolute_beg_time"]
+                abs_end_times = bursts["absolute_end_time"]
+                rel_beg_times = bursts["relative_beg_time"]
+                rel_end_times = bursts["relative_end_time"]
+                stim_presentation_ids = bursts["stimulus_presentation_id"]
+                unit_ids = np.full(len(stim_presentation_ids), unit_id)
+                current_unit_presenationwise_times = pd.DataFrame(
+                    {
+                        "absolute_beg_time": abs_beg_times,
+                        "absolute_end_time": abs_end_times,
+                        "relative_beg_time": rel_beg_times,
+                        "relative_end_time": rel_end_times,
+                        "stimulus_presentation_id": stim_presentation_ids,
+                        "unit_id": unit_ids,
+                    }
+                )
+                presentationwise_times = pd.concat(
+                    [presentationwise_times, current_unit_presenationwise_times],
+                    ignore_index=True,
+                )
+                # presentationwise_times.set_index("absolute_beg_time").join(current_unit_presenationwise_times.set_index("absolute_beg_time"))
+        presentationwise_times = presentationwise_times.sort_values(
+            by=["absolute_beg_time"], ascending=True
+        )
+        # presentationwise_times.drop(["index"], axis=1)
+        return presentationwise_times
+
     def presentationwise_non_burst_count(self, name):
         pass
-    
+
     def presentationwise_non_burst_times(self, name):
         pass
 
@@ -578,7 +688,7 @@ class SessionProcessor:
         # Isolate PSTHs by class (so collect all the responses to 45 degrees in one spot,
         # 90 in another, etc). With the PSTHs isolated by class, shuffling them is easier
         # because we then just have to loop through bins and units to shuffle.
-        
+
         rng = default_rng()
         num_bins = len(bin_edges) - 1
         num_presentations = len(stim_presentation_order)
