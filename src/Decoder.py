@@ -80,6 +80,7 @@ class Decoder:
         self.accuracies_by_bin = None
         self.cv_accuracies = None
         self.whole_burst_dict = None
+        self.whole_single_dict = None
 
     def get_stimulus_type(self):
         """Brief summary of what this function does.
@@ -171,8 +172,9 @@ class Decoder:
         self.cv_accuracies = cv_accuracies
         return
 
-    def add_bursts(self, whole_burst_dict):
+    def add_bursts(self, whole_burst_dict, whole_single_dict):
         self.whole_burst_dict = whole_burst_dict
+        self.whole_single_dict = whole_single_dict
         return
 
     # To check whether this Decoder has been run
@@ -195,3 +197,6 @@ class Decoder:
 
     def has_bursts(self) -> bool:
         return self.whole_burst_dict is not None
+
+    def has_singles(self) -> bool:
+        return self.whole_single_dict is not None

@@ -129,6 +129,8 @@ class SessionProcessor:
         bin_stop=0.0,
         bin_width=0.05,
         classifier=LinearSVC(),
+        burst_dict=None,
+        single_dict=None,
         shuffle_trials=False,
     ) -> None:
         """Collects all the data needed to decode stimuli from the neural activity in self.session.
@@ -193,7 +195,11 @@ class SessionProcessor:
             y,
             name=name,
         )
-        return name  # NOTE: This function may not be complete
+
+        if (burst_dict is not None) and (single_dict is not None):
+            self.add_bursts(burst_dict, single_dict, name, shuffle_trials)
+
+        return name
 
     # Idea: Eventually what we want, is to pass a set of stim names, and return psths, weights,
     # correlations, etc for every stim
@@ -272,6 +278,14 @@ class SessionProcessor:
         _______
         
         """
+        # TODO: Add burst, non burst, and 2 channel functionality
+        # General plan: Check that bursts and singles are present
+        # If they are: do everything identically
+        # Solution: make this function a wrapper function that
+        # passes the x and y data directly, so that it can be
+        # called with x=bursts, then called again with x=singles,
+        # and so on
+
         # Check that the decoder exists, unpack it's information
         if not name in self._decoders.keys():
             raise ValueError(
@@ -446,7 +460,7 @@ class SessionProcessor:
         warnings.filterwarnings("default")
         return
 
-    def add_bursts(self, burst_dict, name, shuffled=False):
+    def add_bursts(self, burst_dict, single_dict, name, shuffled=False):
 
         if not name in self._decoders.keys():
             raise ValueError(
@@ -456,19 +470,23 @@ class SessionProcessor:
         # burst_dict is a dictionary with unit ids as keys, and the whole burst
         # train for the particular stimulus epoch.
         if shuffled:
+            # FIXME: This needs to be done for every unit id
             rng = default_rng()
             stim_presentation_ids = list(burst_dict["stimulus_presentation_ids"])
             burst_dict["stimulus_presentation_ids"] = rng.shuffle(stim_presentation_ids)
 
-        self._decoders[name].add_bursts(burst_dict)
+            stim_presentation_ids = list(single_dict["stimulus_presentation_ids"])
+            single_dict["stimulus_presentation_ids"] = rng.shuffle(
+                stim_presentation_ids
+            )
+
+        self._decoders[name].add_bursts(burst_dict, single_dict)
 
         return
 
-    # TODO: Implement the below functions
-    # A nice sanity check is merging the burst and single spikes returns the original spike train
     def presentationwise_burst_count(self, name):
-        # TODO: Clarify in the documentation for this function, that a burst might straddle bin edges,
-        # so bursts are considered to be inside the bin they start in
+        # TODO: Clarify in the documentation for this function that a burst might straddle bin edges,
+        # so bursts are considered to be inside the bin they start in, regardless of where they end
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
@@ -491,7 +509,7 @@ class SessionProcessor:
             burst_dict = self._decoders[name].whole_burst_dict
             num_presentations, num_bins, num_units = x.shape
 
-        # Want: an array with shape (num_presentations, num_bins, num_units)
+        # Initialize the return array
         presentationwise_counts = np.zeros((num_presentations, num_bins, num_units))
 
         # Walk through each bin, and check if any of the beg times are in it. If they are,
@@ -520,15 +538,15 @@ class SessionProcessor:
                             presentation_id - stim_presentation_id_offset
                         )
 
-                        # Count how many bursts occured for this presentation, in this bin,
-                        # with this unit
+                        # Count how many bursts occured for this presentation (presentation_idx),
+                        # in this bin (bin_idx - 1), with this unit (unit_idx)
                         presentationwise_counts[
                             presentation_idx, bin_idx - 1, unit_idx
                         ] += 1
 
             unit_idx += 1
 
-        # Should return: xarray with label 'spike counts,' 'stimulus_presentation_id',
+        # Should return: xarray with name 'burst_counts,' and axis labels 'stimulus_presentation_id',
         # 'time_relative_to_stimulus_onset', and 'unit_id'
         return xarray.DataArray(
             data=presentationwise_counts,
@@ -540,29 +558,17 @@ class SessionProcessor:
             name="burst_counts",
         )
 
-    def presentationwise_burst_times(self, name):  # , time_reference='both'):
+    def presentationwise_burst_times(self, name):
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
             )
         elif not self._decoders[name].has_bursts():
-            raise ValueError(f"{name} does not have any bursts to count.")
+            raise ValueError(f"{name} does not have any bursts.")
         else:
-            (
-                classifier,
-                stimulus_type,
-                stim_table,
-                stim_modalities,
-                bins,
-                x,
-                y,
-            ) = self._decoders[name].unpack()
-            # stim_presentation_ids = stim_table.index.values
-            # stim_presentation_id_offset = int(stim_presentation_ids[0])
-            # stim_presentation_indices = stim_presentation_ids - stim_presentation_ids[0]
             burst_dict = self._decoders[name].whole_burst_dict
-            num_presentations, num_bins, num_units = x.shape
 
+        # Initialize the return dataframe with appropriate column labels
         presentationwise_times = pd.DataFrame(
             {
                 "absolute_beg_time": [],
@@ -575,12 +581,17 @@ class SessionProcessor:
         )
         for unit_id, bursts in burst_dict.items():
             if bursts is not None:
+                # Get the columns from `bursts` that describe the presentationwise burst times
                 abs_beg_times = bursts["absolute_beg_time"]
                 abs_end_times = bursts["absolute_end_time"]
                 rel_beg_times = bursts["relative_beg_time"]
                 rel_end_times = bursts["relative_end_time"]
                 stim_presentation_ids = bursts["stimulus_presentation_id"]
+                # unit id needs to be included. `bursts` is organized by unit,
+                # so we just need to add a column full of this particular unit id
                 unit_ids = np.full(len(stim_presentation_ids), unit_id)
+
+                # Collect everything into a dataframe
                 current_unit_presenationwise_times = pd.DataFrame(
                     {
                         "absolute_beg_time": abs_beg_times,
@@ -591,23 +602,149 @@ class SessionProcessor:
                         "unit_id": unit_ids,
                     }
                 )
+
+                # Join the new dataframe with the previous one(s) created
                 presentationwise_times = pd.concat(
                     [presentationwise_times, current_unit_presenationwise_times],
                     ignore_index=True,
                 )
-                # presentationwise_times.set_index("absolute_beg_time").join(current_unit_presenationwise_times.set_index("absolute_beg_time"))
+
+        # Present the burst times in the absolute order they occured
         presentationwise_times = presentationwise_times.sort_values(
-            by=["absolute_beg_time"], ascending=True
+            by=["absolute_beg_time"], ascending=True, ignore_index=True
         )
         # presentationwise_times.drop(["index"], axis=1)
         return presentationwise_times
 
     def presentationwise_non_burst_count(self, name):
-        pass
+        if not name in self._decoders.keys():
+            raise ValueError(
+                f"{name} did not match the name of any decoders constructed by this object."
+            )
+        elif not self._decoders[name].has_singles():
+            raise ValueError(
+                f"{name} does not have any isolated single spikes to count."
+            )
+        else:
+            (
+                classifier,
+                stimulus_type,
+                stim_table,
+                stim_modalities,
+                bins,
+                x,
+                y,
+            ) = self._decoders[name].unpack()
+            stim_presentation_ids = stim_table.index.values
+            stim_presentation_id_offset = int(stim_presentation_ids[0])
+            # stim_presentation_indices = stim_presentation_ids - stim_presentation_ids[0]
+            single_dict = self._decoders[name].whole_single_dict
+            num_presentations, num_bins, num_units = x.shape
+
+        # Initialize the return array
+        presentationwise_counts = np.zeros((num_presentations, num_bins, num_units))
+
+        # Walk through each bin, and check if any of the spike times are in it. If they are,
+        # presentationwise_counts[presentation_id, bin_num, unit_id] += 1
+        unit_idx = 0
+        for unit_id, singles in single_dict.items():
+            if singles is not None:
+                # Initialize the "next bin" to be the first bin
+                next_bin = bins[0]
+                for bin_idx in range(1, num_bins):
+                    # Set the current bin, and next bin
+                    current_bin = next_bin
+                    next_bin = bins[bin_idx]
+
+                    # Get all the singles that lie between the current and next bin edge
+                    binned_singles = singles.loc[
+                        (singles["relative_spike_time"] < next_bin)
+                    ]
+                    binned_singles = binned_singles.loc[
+                        (binned_singles["relative_spike_time"] >= current_bin)
+                    ]
+
+                    # Count how many bursts were in this bin
+                    for presentation_id in binned_singles["stimulus_presentation_id"]:
+                        # The presentation ID may not index from 0, so we force it to by
+                        # subtracting the smallest presentation_id
+                        presentation_idx = int(
+                            presentation_id - stim_presentation_id_offset
+                        )
+
+                        # Count how many bursts occured for this presentation (presentation_idx),
+                        # in this bin (bin_idx - 1), with this unit (unit_idx)
+                        presentationwise_counts[
+                            presentation_idx, bin_idx - 1, unit_idx
+                        ] += 1
+
+            unit_idx += 1
+
+        # Should return: xarray with name 'single_spike_counts,' and axis labels 'stimulus_presentation_id',
+        # 'time_relative_to_stimulus_onset', and 'unit_id'
+        return xarray.DataArray(
+            data=presentationwise_counts,
+            dims=[
+                "stimulus_presentation_id",
+                "time_relative_to_stimulus_onset",
+                "unit_id",
+            ],
+            name="single_spike_counts",
+        )
 
     def presentationwise_non_burst_times(self, name):
-        pass
+        if not name in self._decoders.keys():
+            raise ValueError(
+                f"{name} did not match the name of any decoders constructed by this object."
+            )
+        elif not self._decoders[name].has_singles():
+            raise ValueError(f"{name} does not have any isolated single spikes.")
+        else:
+            single_dict = self._decoders[name].whole_single_dict
 
+        # Initialize the return dataframe with appropriate column labels
+        presentationwise_times = pd.DataFrame(
+            {
+                "absolute_spike_time": [],
+                "relative_spike_time": [],
+                "stimulus_presentation_id": [],
+                "unit_id": [],
+            }
+        )
+        for unit_id, singles in single_dict.items():
+            if singles is not None:
+                # Get the columns from `singles` that describe the presentationwise burst times
+                abs_spike_times = singles["absolute_spike_time"]
+                rel_spike_times = singles["relative_spike_time"]
+                stim_presentation_ids = singles["stimulus_presentation_id"]
+                # unit id needs to be included. `singles` is organized by unit,
+                # so we just need to add a column full of this particular unit id
+                unit_ids = np.full(len(stim_presentation_ids), unit_id)
+
+                # Collect everything into a dataframe
+                current_unit_presenationwise_times = pd.DataFrame(
+                    {
+                        "absolute_spike_time": abs_spike_times,
+                        "relative_spike_time": rel_spike_times,
+                        "stimulus_presentation_id": stim_presentation_ids,
+                        "unit_id": unit_ids,
+                    }
+                )
+
+                # Join the new dataframe with the previous one(s) created
+                presentationwise_times = pd.concat(
+                    [presentationwise_times, current_unit_presenationwise_times],
+                    ignore_index=True,
+                )
+
+        # Present the burst times in the absolute order they occured
+        presentationwise_times = presentationwise_times.sort_values(
+            by=["absolute_spike_time"], ascending=True, ignore_index=True
+        )
+        # presentationwise_times.drop(["index"], axis=1)
+        return presentationwise_times
+
+    # TODO: Implement the below functions
     def save(self, path=""):
         """Brief summary of what this function does.
         
