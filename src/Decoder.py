@@ -74,18 +74,18 @@ class Decoder:
         if name == "":
             name = copy.deepcopy(stimulus_type)
         self.name = name
-        #self.weights_by_bin = None
-        #self.weights_by_modality = None
-        #self.weights_by_cell = None
-        #self.accuracies_by_bin = None
-        #self.cv_accuracies = None
+        # self.weights_by_bin = None
+        # self.weights_by_modality = None
+        # self.weights_by_cell = None
+        # self.accuracies_by_bin = None
+        # self.cv_accuracies = None
         self.weights = None
         self.accuracy_scores = None
         self.thorough_accuracy_scores = None
         self.whole_burst_dict = None
         self.whole_single_dict = None
-        #self.burst_weights = None
-        #self.single_weights = None
+        # self.burst_weights = None
+        # self.single_weights = None
 
     def get_stimulus_type(self):
         """Brief summary of what this function does.
@@ -146,7 +146,9 @@ class Decoder:
         """
         if not self.has_weights():
             raise ValueError(f"{self.name} has no weights.")
-        return self.weights#(self.weights_by_bin, self.weights_by_modality, self.weights_by_cell)
+        return (
+            self.weights
+        )  # (self.weights_by_bin, self.weights_by_modality, self.weights_by_cell)
 
     # def add_weights(
     #     self,
@@ -157,18 +159,17 @@ class Decoder:
     #     cv_accuracies,
     # ) -> None:
     #     """Brief summary of what this function does.
-        
+
     #     Note
     #     ____
     #     There's probably something to note here
-        
+
     #     Parameters
     #     __________
-        
-        
+
     #     Returns
     #     _______
-        
+
     #     """
     #     self.weights_by_bin = weights_by_bin
     #     self.weights_by_modality = weights_by_modality
@@ -177,12 +178,7 @@ class Decoder:
     #     self.cv_accuracies = cv_accuracies
     #     return
 
-    def add_weights(
-        self,
-        weights,
-        accuracy_scores,
-        thorough_accuracy_scores,
-    ) -> None:
+    def add_weights(self, weights, accuracy_scores, thorough_accuracy_scores,) -> None:
         """Brief summary of what this function does.
         
         Note

@@ -270,7 +270,7 @@ class SessionProcessor:
         return
 
     def calculate_decoder_weights(
-        self, name, test_size=0.2, thorough_accuracy_scoring=False, cv_count=5
+        self, name, test_size=0.2, cv_accuracy_scoring=False, cv_count=5
     ):
         """Brief summary of what this function does.
         
@@ -303,31 +303,64 @@ class SessionProcessor:
             ) = self._decoders[name].unpack()
             stim_presentation_ids = stim_table.index.values
 
-        if thorough_accuracy_scoring:
+        # Initialize variable for cross validation scoring
+        if cv_accuracy_scoring:
             thorough_accuracy_scores = {}
         else:
             thorough_accuracy_scores = None
 
+        # Collect the decoding inputs (whole spike trains, along with bursts and singles if available)
         data_dict = {}
         data_dict["whole"] = x
         data_labels = y.astype(int)
         if self._decoders[name].has_bursts():
-            data_dict["bursts"] = self.presentationwise_burst_counts(name, bins, stim_presentation_ids, self.all_units)
-            data_dict["singles"] = self.presentationwise_non_burst_counts(name, bins, stim_presentation_ids, self.all_units)
+            data_dict["bursts"] = self.presentationwise_burst_counts(
+                name, bins, stim_presentation_ids, self.all_units
+            )
+            data_dict["singles"] = self.presentationwise_non_burst_counts(
+                name, bins, stim_presentation_ids, self.all_units
+            )
+            # data_dict["two_channel"] -> likely a different function entirely, because the random sampling needs to be repeated
 
+        # Collect the weights, accuracy scores, and cv_accuracy scores if specified
         weights = {}
         accuracy_scores = {}
         for spike_train_type, spike_train in data_dict.items():
-            weights_by_bin, weights_by_modality, weights_by_cell, accuracies, thorough_accuracy_scores = self._calculate_decoder_weights(spike_train, data_labels, name, stim_modalities, classifier, test_size, thorough_accuracy_scores, cv_count)
+            # spike_train_type: "whole" "bursts" "singles" (and maybe "two_channel" later)
+            (
+                weights_by_bin,
+                weights_by_modality,
+                weights_by_cell,
+                accuracies,
+                thorough_accuracy_scores,
+            ) = self._calculate_decoder_weights(
+                spike_train,
+                data_labels,
+                stim_modalities,
+                classifier,
+                test_size,
+                thorough_accuracy_scores,
+                cv_count,
+            )
             weights[spike_train_type] = weights_by_cell
             accuracy_scores[spike_train_type] = accuracies
-            if thorough_accuracy_scoring: thorough_accuracy_scores[spike_train_type] = thorough_accuracy_scores
-        
-        self._decoders[name].add_weights(weights, accuracy_scores, thorough_accuracy_scores)
+            if cv_accuracy_scoring:
+                thorough_accuracy_scores[spike_train_type] = thorough_accuracy_scores
+
+        self._decoders[name].add_weights(
+            weights, accuracy_scores, thorough_accuracy_scores
+        )
         return
 
     def _calculate_decoder_weights(
-        self, data, labels, name, stim_modalities, classifier, test_size, thorough_accuracy_scores, cv_count
+        self,
+        data,
+        labels,
+        stim_modalities,
+        classifier,
+        test_size,
+        thorough_accuracy_scores,
+        cv_count,
     ):
         """Brief summary of what this function does.
         
@@ -353,7 +386,7 @@ class SessionProcessor:
 
         # Get data information
         num_presentations, num_bins, num_units = data.shape
-        #labels = labels.astype(int)
+        # labels = labels.astype(int)
         # `labels` used to be `y_true`
 
         # Initialize everything
@@ -365,6 +398,7 @@ class SessionProcessor:
         )
         weights_by_bin = {}
         accuracies_by_bin = {}
+        cv_scorer = make_scorer(accuracy_score)
 
         # Train the classifier by bin, then store the resulting weights
         for bin in range(num_bins):
@@ -392,11 +426,7 @@ class SessionProcessor:
 
             if thorough_accuracy_scores is not None:
                 thorough_accuracy_scores[bin] = cross_val_score(
-                    classifier,
-                    x_bin,
-                    labels,
-                    cv=cv_count,
-                    scoring=make_scorer(accuracy_score),
+                    classifier, x_bin, labels, cv=cv_count, scoring=cv_scorer,
                 )
 
             # Store the weights, sorted by modality
@@ -417,7 +447,13 @@ class SessionProcessor:
                 ]
                 modality_idx += 1
             unit_idx += 1
-        return weights_by_modality, weights_by_bin, weights_by_cell, accuracies_by_bin, thorough_accuracy_scores
+        return (
+            weights_by_modality,
+            weights_by_bin,
+            weights_by_cell,
+            accuracies_by_bin,
+            thorough_accuracy_scores,
+        )
         # self._decoders[name].add_weights(
         #     weights_by_bin,
         #     weights_by_modality,
@@ -431,7 +467,7 @@ class SessionProcessor:
         # else:
         #     return accuracies_by_bin
         # TODO: Alter the return values to be weights_by_bin,
-        # weights_by_modality, weights_by_cell, accuracies_by_bin, and 
+        # weights_by_modality, weights_by_cell, accuracies_by_bin, and
         # thorough_accuracy_scores so that the wrapper function can handle
         # the data acordingly
 
@@ -476,9 +512,7 @@ class SessionProcessor:
             #     y,
             # ) = self._decoders[name].unpack()
             # stim_presentation_ids = stim_table.index.values
-            weights_by_bin, weights_by_modality, weights_by_cell = self._decoders[
-                name
-            ].unpack_weights()
+            all_weights = self._decoders[name].unpack_weights()
             # histograms = self._histograms[name]
             # M number of stimulus modalities -> need the mean histogram across the stim modalities
             modality_histograms = {}  # self._modality_histograms[name]
@@ -488,6 +522,7 @@ class SessionProcessor:
                         dim="stimulus_presentation_id"
                     )
                 )
+
         warnings.filterwarnings("ignore")
         cell_correlation_matrices = (
             {}
@@ -495,16 +530,30 @@ class SessionProcessor:
         within_class_correlations = (
             {}
         )  # The mean of the diagonals of the above matrices
-        cell_idx = 0
-        for cell_id in self.all_units:
-            cell_weights = weights_by_cell[cell_id]
-            # Get the psth for the current cell for each modality (arr: (num_bins, num_modalities))
-            cell_histograms = self._organize_histograms(modality_histograms, cell_idx)
-            (
-                cell_correlation_matrices[cell_id],
-                within_class_correlations[cell_id],
-            ) = self._correlate_by_cell(cell_weights, cell_histograms)
-            cell_idx += 1
+
+        for spike_train_type, weights in all_weights.items():
+            # cstt -> current_spike_train_type
+            cstt_cell_correlation_matrices = {}
+            cstt_within_class_correlations = {}
+            cell_idx = 0
+            for cell_id in self.all_units:
+                cell_weights = weights[cell_id]
+                # Get the psth for the current cell for each modality (arr: (num_bins, num_modalities))
+                cell_histograms = self._organize_histograms(
+                    modality_histograms, cell_idx
+                )
+                (
+                    cstt_cell_correlation_matrices[cell_id],
+                    cstt_within_class_correlations[cell_id],
+                ) = self._correlate_by_cell(cell_weights, cell_histograms)
+                cell_idx += 1
+                cell_correlation_matrices[
+                    spike_train_type
+                ] = cstt_cell_correlation_matrices
+                within_class_correlations[
+                    spike_train_type
+                ] = cstt_within_class_correlations
+
         self._cell_correlations[name] = cell_correlation_matrices
         self._within_class_correlations[name] = within_class_correlations
         warnings.filterwarnings("default")
