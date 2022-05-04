@@ -177,7 +177,14 @@ class SessionProcessor:
         # Shuffle x if need be
         if shuffle_trials:
             # Shuffle trials within classes
-            x = self._shuffle_trials(bins, stim_ids, y, stim_modalities, name, self._presentationwise_spike_counts)
+            x = self._shuffle_trials(
+                bins,
+                stim_ids,
+                y,
+                stim_modalities,
+                name,
+                self._presentationwise_spike_counts,
+            )
         else:
             # Collect the data
             x = self.session.presentationwise_spike_counts(
@@ -481,45 +488,63 @@ class SessionProcessor:
 
         # burst_dict is a dictionary with unit ids as keys, and the whole burst
         # train for the particular stimulus epoch.
-        if shuffled:            
+        if shuffled:
             # General idea: Isolate entire rows by stim_id, then shuffle the stim_id in those isolated
             # dataframes, then recombine the isolated dataframes and sort by spike time
-            
+
             # Get all the indices of each stim class so that we can isolate the appropriate rows
             class_presentation_indicies = {}
             for (
                 stim_class
-            ) in stim_modalities:  # For each class of stimulus (e.g. each presentation angle)
+            ) in (
+                stim_modalities
+            ):  # For each class of stimulus (e.g. each presentation angle)
                 class_presentation_indicies[stim_class] = []
 
                 # Collect the indicies for each presentation of that class
                 for k in range(num_presentations):
                     if stim_class == y[k]:
-                        class_presentation_indicies[stim_class] = class_presentation_indicies[stim_class] + [k]
-                class_presentation_indicies[stim_class] = {"stimulus_presentation_id": class_presentation_indicies[stim_class]}
-            
+                        class_presentation_indicies[
+                            stim_class
+                        ] = class_presentation_indicies[stim_class] + [k]
+                class_presentation_indicies[stim_class] = {
+                    "stimulus_presentation_id": class_presentation_indicies[stim_class]
+                }
+
             shuffled_burst_dict = {}
             shuffled_single_dict = {}
             # Trim burst_dict and single_dict, shuffle just the stimulus presentation id
             for unit_id in self.all_units:
                 current_whole_bursts = burst_dict[unit_id]
                 current_whole_singles = single_dict[unit_id]
-                
+
                 if current_whole_bursts is not None:
                     shuffled_bursts = pd.DataFrame(columns=current_whole_bursts.columns)
                     # For each stim class
                     for stim_class in stim_modalities:
                         # Get the stim presentation indices
-                        current_presentation_indices = class_presentation_indicies[stim_class]
-                        
+                        current_presentation_indices = class_presentation_indicies[
+                            stim_class
+                        ]
+
                         # Isolate the bursts of this particular stim class
-                        current_partial_bursts = current_whole_bursts.isin(current_presentation_indices)["stimulus_presentation_id"]
-                        current_partial_bursts = current_whole_bursts.loc[current_partial_bursts]
-                        
+                        current_partial_bursts = current_whole_bursts.isin(
+                            current_presentation_indices
+                        )["stimulus_presentation_id"]
+                        current_partial_bursts = current_whole_bursts.loc[
+                            current_partial_bursts
+                        ]
+
                         # Shuffle the stim presentation ids
-                        current_partial_bursts["stimulus_presentation_id"] = current_partial_bursts["stimulus_presentation_id"].sample(frac=1)
-                        shuffled_bursts = pd.concat([shuffled_bursts, current_partial_bursts], ignore_index=True)
-                        
+                        current_partial_bursts[
+                            "stimulus_presentation_id"
+                        ] = current_partial_bursts["stimulus_presentation_id"].sample(
+                            frac=1
+                        )
+                        shuffled_bursts = pd.concat(
+                            [shuffled_bursts, current_partial_bursts], ignore_index=True
+                        )
+
                     # Sort the shuffled bursts acording to their absolute times, which will put the bursts in the
                     # "correct order" but with the particular stim presentation ids still shuffled
                     # (i.e. the presentations are the same order as before shuffling, but the responses are
@@ -529,23 +554,38 @@ class SessionProcessor:
                     )
                     shuffled_burst_dict[unit_id] = shuffled_bursts
                 else:
-                    shuffled_burst_dict[unit_id] = None    
-                
+                    shuffled_burst_dict[unit_id] = None
+
                 if current_whole_singles is not None:
-                    shuffled_singles = pd.DataFrame(columns=current_whole_singles.columns)
+                    shuffled_singles = pd.DataFrame(
+                        columns=current_whole_singles.columns
+                    )
                     # For each stim class
                     for stim_class in stim_modalities:
                         # Get the stim presentation indices
-                        current_presentation_indices = class_presentation_indicies[stim_class]
-                        
+                        current_presentation_indices = class_presentation_indicies[
+                            stim_class
+                        ]
+
                         # Isolate the singles of this particular stim class
-                        current_partial_singles = current_whole_singles.isin(current_presentation_indices)["stimulus_presentation_id"]
-                        current_partial_singles = current_whole_singles.loc[current_partial_singles]
-                        
+                        current_partial_singles = current_whole_singles.isin(
+                            current_presentation_indices
+                        )["stimulus_presentation_id"]
+                        current_partial_singles = current_whole_singles.loc[
+                            current_partial_singles
+                        ]
+
                         # Shuffle the stim presentation ids
-                        current_partial_singles["stimulus_presentation_id"] = current_partial_singles["stimulus_presentation_id"].sample(frac=1)
-                        shuffled_singles = pd.concat([shuffled_singles, current_partial_singles], ignore_index=True)
-                    
+                        current_partial_singles[
+                            "stimulus_presentation_id"
+                        ] = current_partial_singles["stimulus_presentation_id"].sample(
+                            frac=1
+                        )
+                        shuffled_singles = pd.concat(
+                            [shuffled_singles, current_partial_singles],
+                            ignore_index=True,
+                        )
+
                     # Sort the shuffled singles acording to their absolute times, which will put the singles
                     # in the "correct order" but with the particular stim presentation ids still shuffled
                     # (i.e. the presentations are the same order as before shuffling, but the responses are
@@ -556,21 +596,31 @@ class SessionProcessor:
                     shuffled_single_dict[unit_id] = shuffled_singles
                 else:
                     shuffled_single_dict[unit_id] = None
-                    
+
             burst_dict = shuffled_burst_dict
             single_dict = shuffled_single_dict
 
         self._decoders[name].add_bursts(burst_dict, single_dict)
 
         return
-    
-    def _presentationwise_spike_counts(self, name, bin_edges, stimulus_presentation_ids, unit_ids):
-        return self.session.presentationwise_spike_counts(bin_edges=bin_edges, stimulus_presentation_ids=stimulus_presentation_ids, unit_ids=unit_ids)
+
+    def _presentationwise_spike_counts(
+        self, name, bin_edges, stimulus_presentation_ids, unit_ids
+    ):
+        return self.session.presentationwise_spike_counts(
+            bin_edges=bin_edges,
+            stimulus_presentation_ids=stimulus_presentation_ids,
+            unit_ids=unit_ids,
+        )
 
     def _presentationwise_spike_times(self, name, stimulus_presentation_ids, unit_ids):
-        return self.session.presentationwise_spike_times(stimulus_presentation_ids=stimulus_presentation_ids, unit_ids=unit_ids)
+        return self.session.presentationwise_spike_times(
+            stimulus_presentation_ids=stimulus_presentation_ids, unit_ids=unit_ids
+        )
 
-    def presentationwise_burst_counts(self, name, bin_edges, stimulus_presentation_ids, unit_ids):
+    def presentationwise_burst_counts(
+        self, name, bin_edges, stimulus_presentation_ids, unit_ids
+    ):
         # TODO: Clarify in the documentation for this function that a burst might straddle bin edges,
         # so bursts are considered to be inside the bin they start in, regardless of where they end
         if not name in self._decoders.keys():
@@ -593,17 +643,17 @@ class SessionProcessor:
             stim_presentation_id_offset = int(all_stim_presentation_ids[0])
             burst_dict = self._decoders[name].whole_burst_dict
             bins = bin_edges
-            
+
             num_presentations, num_bins, num_units = x.shape
             num_units = len(unit_ids)
-            
+
         # Initialize the return array
         presentationwise_counts = np.zeros((num_presentations, num_bins, num_units))
-        
+
         # Walk through each bin, and check if any of the beg times are in it. If they are,
         # presentationwise_counts[presentation_id, bin_num, unit_id] += 1
         unit_idx = 0
-        #for unit_id, bursts in burst_dict.items():
+        # for unit_id, bursts in burst_dict.items():
         for unit_id in unit_ids:
             bursts = burst_dict[unit_id]
             if bursts is not None:
@@ -615,7 +665,12 @@ class SessionProcessor:
                     next_bin = bins[bin_idx]
 
                     # Get all the bursts that lie between the current and next bin edge
-                    binned_bursts = bursts.loc[((bursts["relative_beg_time"] < next_bin)*(bursts["relative_beg_time"] >= current_bin))]
+                    binned_bursts = bursts.loc[
+                        (
+                            (bursts["relative_beg_time"] < next_bin)
+                            * (bursts["relative_beg_time"] >= current_bin)
+                        )
+                    ]
 
                     # Count how many bursts were in this bin
                     for presentation_id in binned_bursts["stimulus_presentation_id"]:
@@ -632,7 +687,7 @@ class SessionProcessor:
                         ] += 1
 
             unit_idx += 1
-        
+
         # Take out any stim presentations not in stim_presentation_ids
         indices_to_keep = stimulus_presentation_ids - stim_presentation_id_offset
         presentationwise_counts = presentationwise_counts[indices_to_keep]
@@ -671,20 +726,20 @@ class SessionProcessor:
                 "unit_id": [],
             }
         )
-        #for unit_id, bursts in burst_dict.items():
+        # for unit_id, bursts in burst_dict.items():
         for unit_id in unit_ids:
             bursts = burst_dict[unit_id]
             if bursts is not None:
                 # Only check the specified stimuli (specified by stimulus_presentation_ids)
                 burst_locations = bursts.isin(stim_id_mask)["stimulus_presentation_id"]
                 bursts = bursts.loc[burst_locations]
-                
+
                 # Get the columns from `bursts` that describe the presentationwise burst times
                 abs_beg_times = bursts["absolute_beg_time"]
                 abs_end_times = bursts["absolute_end_time"]
                 rel_beg_times = bursts["relative_beg_time"]
                 rel_end_times = bursts["relative_end_time"]
-                #stim_presentation_ids = bursts["stimulus_presentation_id"]
+                # stim_presentation_ids = bursts["stimulus_presentation_id"]
                 # unit id needs to be included. `bursts` is organized by unit,
                 # so we just need to add a column full of this particular unit id
                 unit_id_arr = np.full(len(bursts), unit_id)
@@ -714,7 +769,9 @@ class SessionProcessor:
         # presentationwise_times.drop(["index"], axis=1)
         return presentationwise_times
 
-    def presentationwise_non_burst_counts(self, name, bin_edges, stimulus_presentation_ids, unit_ids):
+    def presentationwise_non_burst_counts(
+        self, name, bin_edges, stimulus_presentation_ids, unit_ids
+    ):
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
@@ -737,7 +794,7 @@ class SessionProcessor:
             stim_presentation_id_offset = int(stim_presentation_ids[0])
             single_dict = self._decoders[name].whole_single_dict
             bins = bin_edges
-            
+
             num_presentations, num_bins, num_units = x.shape
             num_units = len(unit_ids)
 
@@ -747,7 +804,7 @@ class SessionProcessor:
         # Walk through each bin, and check if any of the spike times are in it. If they are,
         # presentationwise_counts[presentation_id, bin_num, unit_id] += 1
         unit_idx = 0
-        #for unit_id, singles in single_dict.items():
+        # for unit_id, singles in single_dict.items():
         for unit_id in unit_ids:
             singles = single_dict[unit_id]
             if singles is not None:
@@ -760,7 +817,10 @@ class SessionProcessor:
 
                     # Get all the singles that lie between the current and next bin edge
                     binned_singles = singles.loc[
-                        ((singles["relative_spike_time"] < next_bin)*(singles["relative_spike_time"] >= current_bin))
+                        (
+                            (singles["relative_spike_time"] < next_bin)
+                            * (singles["relative_spike_time"] >= current_bin)
+                        )
                     ]
 
                     # Count how many bursts were in this bin
@@ -778,7 +838,7 @@ class SessionProcessor:
                         ] += 1
 
             unit_idx += 1
-            
+
         # Take out any stim presentations not in stim_presentation_ids
         indices_to_keep = stimulus_presentation_ids - stim_presentation_id_offset
         presentationwise_counts = presentationwise_counts[indices_to_keep]
@@ -795,7 +855,9 @@ class SessionProcessor:
             name="single_spike_counts",
         )
 
-    def presentationwise_non_burst_times(self, name, stimulus_presentation_ids, unit_ids):
+    def presentationwise_non_burst_times(
+        self, name, stimulus_presentation_ids, unit_ids
+    ):
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
@@ -805,7 +867,7 @@ class SessionProcessor:
         else:
             single_dict = self._decoders[name].whole_single_dict
             stim_id_mask = {"stimulus_presentation_id": stimulus_presentation_ids}
-        
+
         # Initialize the return dataframe with appropriate column labels
         presentationwise_times = pd.DataFrame(
             {
@@ -815,14 +877,16 @@ class SessionProcessor:
                 "unit_id": [],
             }
         )
-        #for unit_id, singles in single_dict.items():
+        # for unit_id, singles in single_dict.items():
         for unit_id in unit_ids:
             singles = single_dict[unit_id]
             if singles is not None:
                 # Only check the specified stimuli (specified by stimulus_presentation_ids)
-                single_locations = singles.isin(stim_id_mask)["stimulus_presentation_id"]
+                single_locations = singles.isin(stim_id_mask)[
+                    "stimulus_presentation_id"
+                ]
                 singles = singles.loc[single_locations]
-                
+
                 # Get the columns from `singles` that describe the presentationwise burst times
                 abs_spike_times = singles["absolute_spike_time"]
                 rel_spike_times = singles["relative_spike_time"]
@@ -915,8 +979,14 @@ class SessionProcessor:
 
     # (bins, stim_ids, y, stim_modalities)
     def _shuffle_trials(
-        self, bin_edges, stim_ids, stim_presentation_order, stim_classes, name, presentationwise_function
-        ):
+        self,
+        bin_edges,
+        stim_ids,
+        stim_presentation_order,
+        stim_classes,
+        name,
+        presentationwise_function,
+    ):
         """Brief summary of what this function does.
         
         Note
@@ -931,7 +1001,7 @@ class SessionProcessor:
         _______
         
         """
-        
+
         # Overall method:
         # Isolate PSTHs by class (so collect all the responses to 45 degrees in one spot,
         # 90 in another, etc). With the PSTHs isolated by class, shuffling them is easier
@@ -960,7 +1030,10 @@ class SessionProcessor:
             # presentations_by_class[stim_class] = class_presentation_indicies
             presentations_by_class[stim_class] = np.array(
                 presentationwise_function(
-                    name, bin_edges, stim_ids[class_presentation_indicies], self.all_units
+                    name,
+                    bin_edges,
+                    stim_ids[class_presentation_indicies],
+                    self.all_units,
                 )
             )
 
