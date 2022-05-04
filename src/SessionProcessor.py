@@ -24,14 +24,6 @@ from src.Decoder import Decoder
 # construct and evaluate correlation statistics
 # save any relevant data for plots (so basically everything)
 
-# BRING UP: Refactor modality -> class (ie weights_by_modality -> weights_by_class)
-# BRING UP: Include functionality for decoder optimization -> Yes, port the optimization stuff over
-# BRING UP: Docstring format for dictionaries
-
-# For visualization: scripts for plotting
-# Script for running analysis and using the objects (part of both documentation and testing)
-# Make script for replicating shown analyses (also part of both documentation and testing)
-
 
 class SessionProcessor:
     # Currently irrelevant documentation that was dificult to phrase, so I'm waiting to delete it
@@ -39,9 +31,9 @@ class SessionProcessor:
     #        The indices for the beginning of each region's unit ID numbers is held in
     #    _all_unit_dividing_indicies
     """One line summary of SessionProcessor
-    
+
     More in depth description of SessionProcessor
-    
+
     Methods
     _______
     construct_decoder(LIST_ALL_ARGS)
@@ -49,7 +41,7 @@ class SessionProcessor:
     construct_psth(LIST_ALL_ARGS)
         Description of construct_psth
     etc.
-    
+
     Attributes
     __________
     session : EcephysSession
@@ -60,23 +52,23 @@ class SessionProcessor:
     all_units : :obj:`list` of :obj:`int`
         The unit ID number of every cell in this session. all_units is sorted by
         region, e.g. all 'VISp' units lie between all_units[i] and all_units[j].
-    
+
     """
 
     # TODO: Doc me
 
     def __init__(self, session, bursts=None):
         """Create a new SessionProcessor
-        
+
         Note
         ____
         Maybe theres something to note?
-        
+
         Parameters
         __________
         session : EcephysSession
             The EcephysSession to be processed.
-        
+
         """
 
         # Set the internal session and id number
@@ -135,18 +127,18 @@ class SessionProcessor:
         shuffle_trials=False,
     ) -> None:
         """Collects all the data needed to decode stimuli from the neural activity in self.session.
-        
+
         Note
         ____
         There's probably something to note here
-        
+
         Parameters
         __________
-        
-        
+
+
         Returns
         _______
-        
+
         """
         # If a name wasn't provided, name the decoder as explicitly as possible
         if name == "":
@@ -209,9 +201,6 @@ class SessionProcessor:
 
         return name
 
-    # Idea: Eventually what we want, is to pass a set of stim names, and return psths, weights,
-    # correlations, etc for every stim
-
     # Must be called after construct_decoder is called.
     # XXX: Maybe adjust it so that it gives a warning but constructs a default decoder
     # with the name that was passed as an argument?
@@ -222,18 +211,18 @@ class SessionProcessor:
     # a specific decoder
     def construct_psth(self, name):
         """Brief summary of what this function does.
-        
+
         Note
         ____
         There's probably something to note here
-        
+
         Parameters
         __________
-        
-        
+
+
         Returns
         _______
-        
+
         """
         if not name in self._decoders.keys():
             raise ValueError(
@@ -251,21 +240,64 @@ class SessionProcessor:
             ) = self._decoders[name].unpack()
             stim_presentation_ids = stim_table.index.values
 
-        # Generate the histogram
-        self._histograms[name] = self.session.presentationwise_spike_counts(
-            bins, stim_table.index.values, self.all_units
-        )
-
         # Sort the stimulus presentations by modality
         modality_indicies = self._sort_by_modality(
             stim_modalities, y, stim_presentation_ids
         )
 
-        modality_histograms = {}
+        # Generate the histograms
+        histograms = {}
+        histograms["whole"] = self.session.presentationwise_spike_counts(
+            bins, stim_presentation_ids, self.all_units
+        )
+        histograms["bursts"] = (
+            self.presentationwise_burst_counts(
+                name, bins, stim_presentation_ids, self.all_units
+            )
+            if self._decoders[name].has_bursts()
+            else None
+        )
+        histograms["singles"] = (
+            self.presentationwise_non_burst_counts(
+                name, bins, stim_presentation_ids, self.all_units
+            )
+            if self._decoders[name].has_singles()
+            else None
+        )
+        self._histograms[name] = histograms
+
+        # Generate stimulus condition (modality) specific histograms
+        whole_modality_histograms = {}
+        burst_modality_histograms = {} if self._decoders[name].has_bursts() else None
+        single_modality_histograms = {} if self._decoders[name].has_singles() else None
+
+        # For each possible stimulus condition
         for stim in stim_modalities:
-            modality_histograms[stim] = self.session.presentationwise_spike_counts(
+            # Generate the histograms
+            whole_modality_histograms[
+                stim
+            ] = self.session.presentationwise_spike_counts(
                 bins, modality_indicies[stim], self.all_units
             )
+            burst_modality_histograms[stim] = (
+                self.presentationwise_burst_counts(
+                    name, bins, modality_indicies[stim], self.all_units
+                )
+                if self._decoders[name].has_bursts()
+                else None
+            )
+            single_modality_histograms[stim] = (
+                self.presentationwise_non_burst_counts(
+                    name, bins, modality_indicies[stim], self.all_units
+                )
+                if self._decoders[name].has_singles()
+                else None
+            )
+
+        modality_histograms = {}
+        modality_histograms["whole"] = whole_modality_histograms
+        modality_histograms["bursts"] = burst_modality_histograms
+        modality_histograms["singles"] = single_modality_histograms
         self._modality_histograms[name] = modality_histograms
         return
 
@@ -273,18 +305,18 @@ class SessionProcessor:
         self, name, test_size=0.2, cv_accuracy_scoring=False, cv_count=5
     ):
         """Brief summary of what this function does.
-        
+
         Note
         ____
         There's probably something to note here
-        
+
         Parameters
         __________
-        
-        
+
+
         Returns
         _______
-        
+
         """
         # Check that the decoder exists, unpack it's information
         if not name in self._decoders.keys():
@@ -305,21 +337,17 @@ class SessionProcessor:
 
         # Initialize variable for cross validation scoring
         if cv_accuracy_scoring:
-            thorough_accuracy_scores = {}
+            cv_accuracy_scores = {}
         else:
-            thorough_accuracy_scores = None
+            cv_accuracy_scores = None
 
         # Collect the decoding inputs (whole spike trains, along with bursts and singles if available)
         data_dict = {}
         data_dict["whole"] = x
         data_labels = y.astype(int)
         if self._decoders[name].has_bursts():
-            data_dict["bursts"] = self.presentationwise_burst_counts(
-                name, bins, stim_presentation_ids, self.all_units
-            )
-            data_dict["singles"] = self.presentationwise_non_burst_counts(
-                name, bins, stim_presentation_ids, self.all_units
-            )
+            data_dict["bursts"] = self._decoders[name].burst_counts
+            data_dict["singles"] = self._decoders[name].single_counts
             # data_dict["two_channel"] -> likely a different function entirely, because the random sampling needs to be repeated
 
         # Collect the weights, accuracy scores, and cv_accuracy scores if specified
@@ -339,42 +367,33 @@ class SessionProcessor:
                 stim_modalities,
                 classifier,
                 test_size,
-                thorough_accuracy_scores,
                 cv_count,
             )
             weights[spike_train_type] = weights_by_cell
             accuracy_scores[spike_train_type] = accuracies
             if cv_accuracy_scoring:
-                thorough_accuracy_scores[spike_train_type] = thorough_accuracy_scores
+                cv_accuracy_scores[spike_train_type] = thorough_accuracy_scores
 
-        self._decoders[name].add_weights(
-            weights, accuracy_scores, thorough_accuracy_scores
-        )
+        self._decoders[name].add_weights(weights, accuracy_scores, cv_accuracy_scores)
+
         return
 
     def _calculate_decoder_weights(
-        self,
-        data,
-        labels,
-        stim_modalities,
-        classifier,
-        test_size,
-        thorough_accuracy_scores,
-        cv_count,
+        self, data, labels, stim_modalities, classifier, test_size, cv_count,
     ):
         """Brief summary of what this function does.
-        
+
         Note
         ____
         There's probably something to note here
-        
+
         Parameters
         __________
-        
-        
+
+
         Returns
         _______
-        
+
         """
         # TODO: Add burst, non burst, and 2 channel functionality
         # General plan: Check that bursts and singles are present
@@ -383,7 +402,10 @@ class SessionProcessor:
         # passes the x and y data directly, so that it can be
         # called with x=bursts, then called again with x=singles,
         # and so on
-
+        if cv_count > 1:
+            thorough_accuracy_scores = {}
+        else:
+            thorough_accuracy_scores = None
         # Get data information
         num_presentations, num_bins, num_units = data.shape
         # labels = labels.astype(int)
@@ -454,37 +476,21 @@ class SessionProcessor:
             accuracies_by_bin,
             thorough_accuracy_scores,
         )
-        # self._decoders[name].add_weights(
-        #     weights_by_bin,
-        #     weights_by_modality,
-        #     weights_by_cell,
-        #     accuracies_by_bin,
-        #     thorough_accuracy_scores,
-        # )
-
-        # if thorough_accuracy_scores is not None:
-        #     return thorough_accuracy_scores
-        # else:
-        #     return accuracies_by_bin
-        # TODO: Alter the return values to be weights_by_bin,
-        # weights_by_modality, weights_by_cell, accuracies_by_bin, and
-        # thorough_accuracy_scores so that the wrapper function can handle
-        # the data acordingly
 
     def calculate_correlations(self, name):
         """Brief summary of what this function does.
-        
+
         Note
         ____
         There's probably something to note here
-        
+
         Parameters
         __________
-        
-        
+
+
         Returns
         _______
-        
+
         """
         if not name in self._decoders.keys():
             raise ValueError(
@@ -499,29 +505,24 @@ class SessionProcessor:
                 f"{name} has both a decoder and PSTHs, but the decoder has no weights."
             )
         else:
-            # TODO: .unpack_weights() returns a dict of weights now, change this function acordingly
 
-            # Most of the below code may be unneeded, remove it if its still unneeded after testing
-            # (
-            #     classifier,
-            #     stimulus_type,
-            #     stim_table,
-            #     stim_modalities,
-            #     bins,
-            #     x,
-            #     y,
-            # ) = self._decoders[name].unpack()
-            # stim_presentation_ids = stim_table.index.values
             all_weights = self._decoders[name].unpack_weights()
             # histograms = self._histograms[name]
             # M number of stimulus modalities -> need the mean histogram across the stim modalities
-            modality_histograms = {}  # self._modality_histograms[name]
-            for stim in self._modality_histograms[name].keys():
-                modality_histograms[stim] = np.array(
-                    self._modality_histograms[name][stim].mean(
-                        dim="stimulus_presentation_id"
+            modality_histograms = {
+                "whole": {},
+                "bursts": {},
+                "singles": {},
+            }  # self._modality_histograms[name]
+
+            # The values in modality_histograms are the PSTHs for each stimulus condition
+            for spike_train_type in all_weights.keys():
+                for stim in self._modality_histograms[name][spike_train_type].keys():
+                    modality_histograms[spike_train_type][stim] = np.array(
+                        self._modality_histograms[name][spike_train_type][stim].mean(
+                            dim="stimulus_presentation_id"
+                        )
                     )
-                )
 
         warnings.filterwarnings("ignore")
         cell_correlation_matrices = (
@@ -540,19 +541,20 @@ class SessionProcessor:
                 cell_weights = weights[cell_id]
                 # Get the psth for the current cell for each modality (arr: (num_bins, num_modalities))
                 cell_histograms = self._organize_histograms(
-                    modality_histograms, cell_idx
+                    modality_histograms[spike_train_type], cell_idx
                 )
                 (
                     cstt_cell_correlation_matrices[cell_id],
                     cstt_within_class_correlations[cell_id],
                 ) = self._correlate_by_cell(cell_weights, cell_histograms)
-                cell_idx += 1
+
                 cell_correlation_matrices[
                     spike_train_type
                 ] = cstt_cell_correlation_matrices
                 within_class_correlations[
                     spike_train_type
                 ] = cstt_within_class_correlations
+                cell_idx += 1
 
         self._cell_correlations[name] = cell_correlation_matrices
         self._within_class_correlations[name] = within_class_correlations
@@ -578,122 +580,35 @@ class SessionProcessor:
                 y,
             ) = self._decoders[name].unpack()
             num_presentations = x.shape[0]
+            stim_presentation_ids = stim_table.index.values
 
-        # burst_dict is a dictionary with unit ids as keys, and the whole burst
-        # train for the particular stimulus epoch.
+        self._decoders[name].add_bursts(burst_dict, single_dict, None, None)
         if shuffled:
-            # General idea: Isolate entire rows by stim_id, then shuffle the stim_id in those isolated
-            # dataframes, then recombine the isolated dataframes and sort by spike time
+            bursts = self._shuffle_trials(
+                bins,
+                stim_presentation_ids,
+                y,
+                stim_modalities,
+                name,
+                self.presentationwise_burst_counts,
+            )
+            singles = self._shuffle_trials(
+                bins,
+                stim_presentation_ids,
+                y,
+                stim_modalities,
+                name,
+                self.presentationwise_non_burst_counts,
+            )
+        else:
+            bursts = self.presentationwise_burst_counts(
+                name, bins, stim_presentation_ids, self.all_units
+            )
+            singles = self.presentationwise_non_burst_counts(
+                name, bins, stim_presentation_ids, self.all_units
+            )
 
-            # Get all the indices of each stim class so that we can isolate the appropriate rows
-            class_presentation_indicies = {}
-            for (
-                stim_class
-            ) in (
-                stim_modalities
-            ):  # For each class of stimulus (e.g. each presentation angle)
-                class_presentation_indicies[stim_class] = []
-
-                # Collect the indicies for each presentation of that class
-                for k in range(num_presentations):
-                    if stim_class == y[k]:
-                        class_presentation_indicies[
-                            stim_class
-                        ] = class_presentation_indicies[stim_class] + [k]
-                class_presentation_indicies[stim_class] = {
-                    "stimulus_presentation_id": class_presentation_indicies[stim_class]
-                }
-
-            shuffled_burst_dict = {}
-            shuffled_single_dict = {}
-            # Trim burst_dict and single_dict, shuffle just the stimulus presentation id
-            for unit_id in self.all_units:
-                current_whole_bursts = burst_dict[unit_id]
-                current_whole_singles = single_dict[unit_id]
-
-                if current_whole_bursts is not None:
-                    shuffled_bursts = pd.DataFrame(columns=current_whole_bursts.columns)
-                    # For each stim class
-                    for stim_class in stim_modalities:
-                        # Get the stim presentation indices
-                        current_presentation_indices = class_presentation_indicies[
-                            stim_class
-                        ]
-
-                        # Isolate the bursts of this particular stim class
-                        current_partial_bursts = current_whole_bursts.isin(
-                            current_presentation_indices
-                        )["stimulus_presentation_id"]
-                        current_partial_bursts = current_whole_bursts.loc[
-                            current_partial_bursts
-                        ]
-
-                        # Shuffle the stim presentation ids
-                        current_partial_bursts[
-                            "stimulus_presentation_id"
-                        ] = current_partial_bursts["stimulus_presentation_id"].sample(
-                            frac=1
-                        )
-                        shuffled_bursts = pd.concat(
-                            [shuffled_bursts, current_partial_bursts], ignore_index=True
-                        )
-
-                    # Sort the shuffled bursts acording to their absolute times, which will put the bursts in the
-                    # "correct order" but with the particular stim presentation ids still shuffled
-                    # (i.e. the presentations are the same order as before shuffling, but the responses are
-                    # shuffled within presentations of the same kind)
-                    shuffled_bursts = shuffled_bursts.sort_values(
-                        by=["absolute_beg_time"], ascending=True, ignore_index=True
-                    )
-                    shuffled_burst_dict[unit_id] = shuffled_bursts
-                else:
-                    shuffled_burst_dict[unit_id] = None
-
-                if current_whole_singles is not None:
-                    shuffled_singles = pd.DataFrame(
-                        columns=current_whole_singles.columns
-                    )
-                    # For each stim class
-                    for stim_class in stim_modalities:
-                        # Get the stim presentation indices
-                        current_presentation_indices = class_presentation_indicies[
-                            stim_class
-                        ]
-
-                        # Isolate the singles of this particular stim class
-                        current_partial_singles = current_whole_singles.isin(
-                            current_presentation_indices
-                        )["stimulus_presentation_id"]
-                        current_partial_singles = current_whole_singles.loc[
-                            current_partial_singles
-                        ]
-
-                        # Shuffle the stim presentation ids
-                        current_partial_singles[
-                            "stimulus_presentation_id"
-                        ] = current_partial_singles["stimulus_presentation_id"].sample(
-                            frac=1
-                        )
-                        shuffled_singles = pd.concat(
-                            [shuffled_singles, current_partial_singles],
-                            ignore_index=True,
-                        )
-
-                    # Sort the shuffled singles acording to their absolute times, which will put the singles
-                    # in the "correct order" but with the particular stim presentation ids still shuffled
-                    # (i.e. the presentations are the same order as before shuffling, but the responses are
-                    # shuffled within presentations of the same kind)
-                    shuffled_singles = shuffled_singles.sort_values(
-                        by=["absolute_spike_time"], ascending=True, ignore_index=True
-                    )
-                    shuffled_single_dict[unit_id] = shuffled_singles
-                else:
-                    shuffled_single_dict[unit_id] = None
-
-            burst_dict = shuffled_burst_dict
-            single_dict = shuffled_single_dict
-
-        self._decoders[name].add_bursts(burst_dict, single_dict)
+        self._decoders[name].add_bursts(burst_dict, single_dict, bursts, singles)
 
         return
 
@@ -782,7 +697,9 @@ class SessionProcessor:
             unit_idx += 1
 
         # Take out any stim presentations not in stim_presentation_ids
-        indices_to_keep = stimulus_presentation_ids - stim_presentation_id_offset
+        indices_to_keep = (
+            np.array(stimulus_presentation_ids) - stim_presentation_id_offset
+        )
         presentationwise_counts = presentationwise_counts[indices_to_keep]
 
         # Should return: xarray with name 'burst_counts,' and axis labels 'stimulus_presentation_id',
@@ -933,7 +850,9 @@ class SessionProcessor:
             unit_idx += 1
 
         # Take out any stim presentations not in stim_presentation_ids
-        indices_to_keep = stimulus_presentation_ids - stim_presentation_id_offset
+        indices_to_keep = (
+            np.array(stimulus_presentation_ids) - stim_presentation_id_offset
+        )
         presentationwise_counts = presentationwise_counts[indices_to_keep]
 
         # Should return: xarray with name 'single_spike_counts,' and axis labels 'stimulus_presentation_id',
@@ -1014,35 +933,35 @@ class SessionProcessor:
     # TODO: Implement the below functions
     def save(self, path=""):
         """Brief summary of what this function does.
-        
+
         Note
         ____
         There's probably something to note here
-        
+
         Parameters
         __________
-        
-        
+
+
         Returns
         _______
-        
+
         """
         pass
 
     def results(self):
         """Brief summary of what this function does.
-        
+
         Note
         ____
         There's probably something to note here
-        
+
         Parameters
         __________
-        
-        
+
+
         Returns
         _______
-        
+
         """
         # TODO: There will be other things that need checking (make sure proper calls have been made, etc.)
         # if self._results is not None:
@@ -1081,18 +1000,18 @@ class SessionProcessor:
         presentationwise_function,
     ):
         """Brief summary of what this function does.
-        
+
         Note
         ____
         There's probably something to note here
-        
+
         Parameters
         __________
-        
-        
+
+
         Returns
         _______
-        
+
         """
 
         # Overall method:
@@ -1134,9 +1053,12 @@ class SessionProcessor:
         # We want to loop through each bin -> current_bin: (num_presentations, num_units)
         # Shuffle each column of current_bin (keeps units' responses within unit, but outside of trial)
         for stim_class in stim_classes:
-            current_class_psth = presentations_by_class[stim_class]
+            # current_class_psth = presentations_by_class[stim_class]
             for bin_idx in range(num_bins):
-                rng.shuffle(current_class_psth[:, bin_idx, :], axis=0)
+                for unit_idx in range(num_units):
+                    rng.shuffle(
+                        presentations_by_class[stim_class][:, bin_idx, unit_idx]
+                    )
                 # current_bin = current_class_psth[:,bin_idx,:]
                 # Shuffle the current bin column wise
                 # current_class_psth[:,bin_idx,:] = rng.shuffle(current_bin, axis=1)
@@ -1162,18 +1084,18 @@ class SessionProcessor:
 
     def _correlate(self, x1, x2):
         """Brief summary of what this function does.
-        
+
         Note
         ____
         There's probably something to note here
-        
+
         Parameters
         __________
-        
-        
+
+
         Returns
         _______
-        
+
         """
         warnings.filterwarnings("ignore")
 
@@ -1186,18 +1108,18 @@ class SessionProcessor:
 
     def _organize_histograms(self, histograms, cell_idx):
         """Brief summary of what this function does.
-        
+
         Note
         ____
         There's probably something to note here
-        
+
         Parameters
         __________
-        
-        
+
+
         Returns
         _______
-        
+
         """
         keys = list(histograms.keys())
         num_bins = histograms[keys[0]].shape[0]
@@ -1215,18 +1137,18 @@ class SessionProcessor:
     # modality_histograms here is a 2D array, where rows are bins, and columns are modalities for a specific cell
     def _correlate_by_cell(self, cell_weights, modality_histograms):
         """Brief summary of what this function does.
-        
+
         Note
         ____
         There's probably something to note here
-        
+
         Parameters
         __________
-        
-        
+
+
         Returns
         _______
-        
+
         """
 
         num_modalities = modality_histograms.shape[1]
@@ -1259,37 +1181,37 @@ class SessionProcessor:
 
     def _make_bins(self, bin_stop, bin_start, bin_width, stim_table):
         """Brief summary of what this function does.
-        
+
         Note
         ____
         There's probably something to note here
-        
+
         Parameters
         __________
-        
-        
+
+
         Returns
         _______
-        
+
         """
-        if bin_stop == 0:
+        if bin_stop == 0.0:
             bin_stop = stim_table.duration.mean() + bin_width
         return np.arange(bin_start, bin_stop, bin_width)
 
     def _sort_by_modality(self, stim_modalities, stim_presentations, stim_ids):
         """Brief summary of what this function does.
-        
+
         Note
         ____
         There's probably something to note here
-        
+
         Parameters
         __________
-        
-        
+
+
         Returns
         _______
-        
+
         """
         indicies = {}
         num_presentations = len(stim_presentations)
@@ -1315,18 +1237,18 @@ class SessionProcessor:
     # Initializes a dictionary full of empty arrays
     def _initialize_dict(self, keys, array_size):
         """Brief summary of what this function does.
-        
+
         Note
         ____
         There's probably something to note here
-        
+
         Parameters
         __________
-        
-        
+
+
         Returns
         _______
-        
+
         """
         empty_dict = {}
         for key in keys:

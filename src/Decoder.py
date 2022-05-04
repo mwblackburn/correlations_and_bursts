@@ -84,6 +84,8 @@ class Decoder:
         self.thorough_accuracy_scores = None
         self.whole_burst_dict = None
         self.whole_single_dict = None
+        self.burst_counts = None
+        self.single_counts = None
         # self.burst_weights = None
         # self.single_weights = None
 
@@ -178,7 +180,7 @@ class Decoder:
     #     self.cv_accuracies = cv_accuracies
     #     return
 
-    def add_weights(self, weights, accuracy_scores, thorough_accuracy_scores,) -> None:
+    def add_weights(self, weights, accuracy_scores, cv_accuracy_scores,) -> None:
         """Brief summary of what this function does.
         
         Note
@@ -195,12 +197,16 @@ class Decoder:
         """
         self.weights = weights
         self.accuracy_scores = accuracy_scores
-        self.thorough_accuracy_scores = thorough_accuracy_scores
+        self.cv_accuracy_scores = cv_accuracy_scores
         return
 
-    def add_bursts(self, whole_burst_dict, whole_single_dict):
+    def add_bursts(
+        self, whole_burst_dict, whole_single_dict, burst_counts, single_counts
+    ):
         self.whole_burst_dict = whole_burst_dict
         self.whole_single_dict = whole_single_dict
+        self.burst_counts = burst_counts
+        self.single_counts = single_counts
         return
 
     # def add_burst_weights(self, burst_weights, single_weights):
