@@ -286,14 +286,6 @@ class SessionProcessor:
         _______
         
         """
-        # TODO: Add burst, non burst, and 2 channel functionality
-        # General plan: Check that bursts and singles are present
-        # If they are: do everything identically
-        # Solution: make this function a wrapper function that
-        # passes the x and y data directly, so that it can be
-        # called with x=bursts, then called again with x=singles,
-        # and so on
-
         # Check that the decoder exists, unpack it's information
         if not name in self._decoders.keys():
             raise ValueError(
@@ -316,9 +308,53 @@ class SessionProcessor:
         else:
             thorough_accuracy_scores = None
 
+        data_dict = {}
+        data_dict["whole"] = x
+        data_labels = y.astype(int)
+        if self._decoders[name].has_bursts():
+            data_dict["bursts"] = self.presentationwise_burst_counts(name, bins, stim_presentation_ids, self.all_units)
+            data_dict["singles"] = self.presentationwise_non_burst_counts(name, bins, stim_presentation_ids, self.all_units)
+
+        weights = {}
+        accuracy_scores = {}
+        for spike_train_type, spike_train in data_dict.items():
+            weights_by_bin, weights_by_modality, weights_by_cell, accuracies, thorough_accuracy_scores = self._calculate_decoder_weights(spike_train, data_labels, name, stim_modalities, classifier, test_size, thorough_accuracy_scores, cv_count)
+            weights[spike_train_type] = weights_by_cell
+            accuracy_scores[spike_train_type] = accuracies
+            if thorough_accuracy_scoring: thorough_accuracy_scores[spike_train_type] = thorough_accuracy_scores
+        
+        self._decoders[name].add_weights(weights, accuracy_scores, thorough_accuracy_scores)
+        return
+
+    def _calculate_decoder_weights(
+        self, data, labels, name, stim_modalities, classifier, test_size, thorough_accuracy_scores, cv_count
+    ):
+        """Brief summary of what this function does.
+        
+        Note
+        ____
+        There's probably something to note here
+        
+        Parameters
+        __________
+        
+        
+        Returns
+        _______
+        
+        """
+        # TODO: Add burst, non burst, and 2 channel functionality
+        # General plan: Check that bursts and singles are present
+        # If they are: do everything identically
+        # Solution: make this function a wrapper function that
+        # passes the x and y data directly, so that it can be
+        # called with x=bursts, then called again with x=singles,
+        # and so on
+
         # Get data information
-        num_presentations, num_bins, num_units = x.shape
-        y_true = y.astype(int)
+        num_presentations, num_bins, num_units = data.shape
+        #labels = labels.astype(int)
+        # `labels` used to be `y_true`
 
         # Initialize everything
         weights_by_modality = self._initialize_dict(
@@ -333,11 +369,11 @@ class SessionProcessor:
         # Train the classifier by bin, then store the resulting weights
         for bin in range(num_bins):
             # Get the data for the current time bin
-            x_bin = x[:, bin, :]
+            x_bin = data[:, bin, :]
 
             # Split the data
             x_train, x_test, y_train, y_test = train_test_split(
-                x_bin, y_true, test_size=test_size
+                x_bin, labels, test_size=test_size
             )
 
             # Train the classifier
@@ -354,11 +390,11 @@ class SessionProcessor:
                 y_test, classifier.predict(x_test), average="micro"
             )  # classifier.score(x_bin, y_true)
 
-            if thorough_accuracy_scoring:
+            if thorough_accuracy_scores is not None:
                 thorough_accuracy_scores[bin] = cross_val_score(
                     classifier,
                     x_bin,
-                    y_true,
+                    labels,
                     cv=cv_count,
                     scoring=make_scorer(accuracy_score),
                 )
@@ -381,19 +417,23 @@ class SessionProcessor:
                 ]
                 modality_idx += 1
             unit_idx += 1
+        return weights_by_modality, weights_by_bin, weights_by_cell, accuracies_by_bin, thorough_accuracy_scores
+        # self._decoders[name].add_weights(
+        #     weights_by_bin,
+        #     weights_by_modality,
+        #     weights_by_cell,
+        #     accuracies_by_bin,
+        #     thorough_accuracy_scores,
+        # )
 
-        self._decoders[name].add_weights(
-            weights_by_bin,
-            weights_by_modality,
-            weights_by_cell,
-            accuracies_by_bin,
-            thorough_accuracy_scores,
-        )
-
-        if thorough_accuracy_scoring:
-            return thorough_accuracy_scores
-        else:
-            return accuracies_by_bin
+        # if thorough_accuracy_scores is not None:
+        #     return thorough_accuracy_scores
+        # else:
+        #     return accuracies_by_bin
+        # TODO: Alter the return values to be weights_by_bin,
+        # weights_by_modality, weights_by_cell, accuracies_by_bin, and 
+        # thorough_accuracy_scores so that the wrapper function can handle
+        # the data acordingly
 
     def calculate_correlations(self, name):
         """Brief summary of what this function does.
@@ -423,6 +463,8 @@ class SessionProcessor:
                 f"{name} has both a decoder and PSTHs, but the decoder has no weights."
             )
         else:
+            # TODO: .unpack_weights() returns a dict of weights now, change this function acordingly
+
             # Most of the below code may be unneeded, remove it if its still unneeded after testing
             # (
             #     classifier,
@@ -469,7 +511,9 @@ class SessionProcessor:
         return
 
     def add_bursts(self, burst_dict, single_dict, name, shuffled=False):
-
+        # TODO: Its probably a good idea to check `name` for the words "shuffled" or "unshuffled"
+        # and shuffle the bursts based on that (keep the `shuffled` bool so that names can still
+        # be user defined)
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
