@@ -57,7 +57,7 @@ class SessionProcessor:
 
     # TODO: Doc me
 
-    def __init__(self, session, bursts=None):
+    def __init__(self, session):
         """Create a new SessionProcessor
 
         Note
@@ -125,7 +125,7 @@ class SessionProcessor:
         burst_dict=None,
         single_dict=None,
         shuffle_trials=False,
-    ) -> None:
+    ) -> str:
         """Collects all the data needed to decode stimuli from the neural activity in self.session.
 
         Note
@@ -565,6 +565,10 @@ class SessionProcessor:
         # TODO: Its probably a good idea to check `name` for the words "shuffled" or "unshuffled"
         # and shuffle the bursts based on that (keep the `shuffled` bool so that names can still
         # be user defined)
+        # TODO: Clarify in the documentation that if you wan't to change the time bins for a
+        # shuffled trial, you have to make a whole new decoder with those specified bins
+        # (emphasize that you do not need to make another processor, call 
+        # construction_decoder again with the specified bins)
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
@@ -582,6 +586,9 @@ class SessionProcessor:
             num_presentations = x.shape[0]
             stim_presentation_ids = stim_table.index.values
 
+        # The presentationwise functions checks for a burst or single dict in 
+        # self._decoders[name], so we add the dicts here, then add the results
+        # from the presentationwise function afterwards
         self._decoders[name].add_bursts(burst_dict, single_dict, None, None)
         if shuffled:
             bursts = self._shuffle_trials(
@@ -608,6 +615,8 @@ class SessionProcessor:
                 name, bins, stim_presentation_ids, self.all_units
             )
 
+        # Add the burst_dict and single_dict (redundantly) then add the PSTH
+        # representations of the bursts and singles
         self._decoders[name].add_bursts(burst_dict, single_dict, bursts, singles)
 
         return
@@ -656,7 +665,7 @@ class SessionProcessor:
             num_units = len(unit_ids)
 
         # Initialize the return array
-        presentationwise_counts = np.zeros((num_presentations, num_bins, num_units))
+        presentationwise_counts = np.zeros((num_presentations, num_bins, num_units), dtype=int)
 
         # Walk through each bin, and check if any of the beg times are in it. If they are,
         # presentationwise_counts[presentation_id, bin_num, unit_id] += 1
@@ -701,6 +710,11 @@ class SessionProcessor:
             np.array(stimulus_presentation_ids) - stim_presentation_id_offset
         )
         presentationwise_counts = presentationwise_counts[indices_to_keep]
+        
+        # Adjust the bin labels to be the center between the edges
+        bin_centers = np.zeros(num_bins)
+        for k in range(1, num_bins+1):
+            bin_centers[k-1] = (bin_edges[k] - bin_edges[k-1])/2 + bin_edges[k-1]
 
         # Should return: xarray with name 'burst_counts,' and axis labels 'stimulus_presentation_id',
         # 'time_relative_to_stimulus_onset', and 'unit_id'
@@ -711,6 +725,11 @@ class SessionProcessor:
                 "time_relative_to_stimulus_onset",
                 "unit_id",
             ],
+            coords=dict(
+                stimulus_presentation_id=(["stimulus_presentation_id"], stimulus_presentation_ids),
+                time_relative_to_stimulus_onset=(["time_relative_to_stimulus_onset"], bin_centers),
+                unit_id=(["unit_id"], np.int64(unit_ids)),
+            ),
             name="burst_counts",
         )
 
@@ -752,7 +771,7 @@ class SessionProcessor:
                 # stim_presentation_ids = bursts["stimulus_presentation_id"]
                 # unit id needs to be included. `bursts` is organized by unit,
                 # so we just need to add a column full of this particular unit id
-                unit_id_arr = np.full(len(bursts), unit_id)
+                unit_id_arr = np.full(len(bursts), unit_id, dtype=int)
 
                 # Collect everything into a dataframe
                 current_unit_presenationwise_times = pd.DataFrame(
@@ -761,7 +780,7 @@ class SessionProcessor:
                         "absolute_end_time": abs_end_times,
                         "relative_beg_time": rel_beg_times,
                         "relative_end_time": rel_end_times,
-                        "stimulus_presentation_id": bursts["stimulus_presentation_id"],
+                        "stimulus_presentation_id": bursts["stimulus_presentation_id"].to_numpy(dtype=int),
                         "unit_id": unit_id_arr,
                     }
                 )
@@ -776,7 +795,11 @@ class SessionProcessor:
         presentationwise_times = presentationwise_times.sort_values(
             by=["absolute_beg_time"], ascending=True, ignore_index=True
         )
-        # presentationwise_times.drop(["index"], axis=1)
+        
+        # Type the dataframe columns correctly
+        presentationwise_times.unit_id = presentationwise_times.unit_id.astype(int)
+        presentationwise_times.stimulus_presentation_id = presentationwise_times.stimulus_presentation_id.astype(int)
+        
         return presentationwise_times
 
     def presentationwise_non_burst_counts(
@@ -809,7 +832,7 @@ class SessionProcessor:
             num_units = len(unit_ids)
 
         # Initialize the return array
-        presentationwise_counts = np.zeros((num_presentations, num_bins, num_units))
+        presentationwise_counts = np.zeros((num_presentations, num_bins, num_units), dtype=int)
 
         # Walk through each bin, and check if any of the spike times are in it. If they are,
         # presentationwise_counts[presentation_id, bin_num, unit_id] += 1
@@ -855,6 +878,11 @@ class SessionProcessor:
         )
         presentationwise_counts = presentationwise_counts[indices_to_keep]
 
+        # Adjust the bin labels to be the center between the edges
+        bin_centers = np.zeros(num_bins)
+        for k in range(1, num_bins+1):
+            bin_centers[k-1] = (bin_edges[k] - bin_edges[k-1])/2 + bin_edges[k-1]
+
         # Should return: xarray with name 'single_spike_counts,' and axis labels 'stimulus_presentation_id',
         # 'time_relative_to_stimulus_onset', and 'unit_id'
         return xarray.DataArray(
@@ -864,6 +892,11 @@ class SessionProcessor:
                 "time_relative_to_stimulus_onset",
                 "unit_id",
             ],
+            coords=dict(
+                stimulus_presentation_id=(["stimulus_presentation_id"], stimulus_presentation_ids),
+                time_relative_to_stimulus_onset=(["time_relative_to_stimulus_onset"], bin_centers),
+                unit_id=(["unit_id"], np.int64(unit_ids)),
+            ),
             name="single_spike_counts",
         )
 
@@ -905,7 +938,7 @@ class SessionProcessor:
                 stimulus_presentation_ids = singles["stimulus_presentation_id"]
                 # unit id needs to be included. `singles` is organized by unit,
                 # so we just need to add a column full of this particular unit id
-                unit_ids = np.full(len(singles), unit_id)
+                unit_id_arr = np.full(len(singles), unit_id)
 
                 # Collect everything into a dataframe
                 current_unit_presenationwise_times = pd.DataFrame(
@@ -913,10 +946,10 @@ class SessionProcessor:
                         "absolute_spike_time": abs_spike_times,
                         "relative_spike_time": rel_spike_times,
                         "stimulus_presentation_id": singles["stimulus_presentation_id"],
-                        "unit_id": unit_ids,
+                        "unit_id": unit_id_arr,
                     }
                 )
-
+                
                 # Join the new dataframe with the previous one(s) created
                 presentationwise_times = pd.concat(
                     [presentationwise_times, current_unit_presenationwise_times],
@@ -927,7 +960,11 @@ class SessionProcessor:
         presentationwise_times = presentationwise_times.sort_values(
             by=["absolute_spike_time"], ascending=True, ignore_index=True
         )
-        # presentationwise_times.drop(["index"], axis=1)
+        
+        # Type the dataframe columns correctly
+        presentationwise_times.unit_id = presentationwise_times.unit_id.astype(int)
+        presentationwise_times.stimulus_presentation_id = presentationwise_times.stimulus_presentation_id.astype(int)
+        
         return presentationwise_times
 
     # TODO: Implement the below functions
