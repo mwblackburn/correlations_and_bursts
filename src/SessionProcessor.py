@@ -182,7 +182,7 @@ class SessionProcessor:
             x = self.session.presentationwise_spike_counts(
                 bins, stim_ids, self.all_units
             )
-            x = np.array(x)
+        x = np.array(x)
 
         # Construct the decoder
         self._decoders[name] = Decoder(
@@ -193,6 +193,7 @@ class SessionProcessor:
             bins,
             x,
             y,
+            shuffle_trials,
             name=name,
         )
 
@@ -587,9 +588,11 @@ class SessionProcessor:
             stim_presentation_ids = stim_table.index.values
 
         # The presentationwise functions checks for a burst or single dict in 
-        # self._decoders[name], so we add the dicts here, then add the results
-        # from the presentationwise function afterwards
-        self._decoders[name].add_bursts(burst_dict, single_dict, None, None)
+        # self._decoders[name], and it checks whether the data has been 
+        # shuffled, so we add the dicts here, and say that it's unshuffled,
+        # then add the results from the presentationwise function afterwards
+        # and specify the shuffled status at the end
+        self._decoders[name].add_bursts(burst_dict, single_dict, None, None, False)
         if shuffled:
             bursts = self._shuffle_trials(
                 bins,
@@ -599,6 +602,7 @@ class SessionProcessor:
                 name,
                 self.presentationwise_burst_counts,
             )
+            bursts.name = "burst_counts"
             singles = self._shuffle_trials(
                 bins,
                 stim_presentation_ids,
@@ -607,6 +611,7 @@ class SessionProcessor:
                 name,
                 self.presentationwise_non_burst_counts,
             )
+            singles.name = "single_spike_counts"
         else:
             bursts = self.presentationwise_burst_counts(
                 name, bins, stim_presentation_ids, self.all_units
@@ -617,7 +622,7 @@ class SessionProcessor:
 
         # Add the burst_dict and single_dict (redundantly) then add the PSTH
         # representations of the bursts and singles
-        self._decoders[name].add_bursts(burst_dict, single_dict, bursts, singles)
+        self._decoders[name].add_bursts(burst_dict, single_dict, bursts, singles, shuffled)
 
         return
 
@@ -664,6 +669,14 @@ class SessionProcessor:
             num_presentations, num_bins, num_units = x.shape
             num_units = len(unit_ids)
 
+        # If this data is shuffled, this function has already been called on all the units and
+        # stim presentation ids, so we can just grab the data from the decoder and return that
+        # with just the specified stim_ids and unit_ids
+        if self._decoders[name].is_shuffled():
+            presentationwise_counts = copy.deepcopy(self._decoders[name].burst_counts)
+            presentationwise_counts = presentationwise_counts.sel(stimulus_presentation_id=stimulus_presentation_ids, unit_id=unit_ids)
+            return presentationwise_counts
+        
         # Initialize the return array
         presentationwise_counts = np.zeros((num_presentations, num_bins, num_units), dtype=int)
 
@@ -734,6 +747,8 @@ class SessionProcessor:
         )
 
     def presentationwise_burst_times(self, name, stimulus_presentation_ids, unit_ids):
+        # TODO: Clarify in the documentation of this function (and the non_burst version)
+        # that there is no shuffling supported by this function at all
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
@@ -831,6 +846,14 @@ class SessionProcessor:
             num_presentations, num_bins, num_units = x.shape
             num_units = len(unit_ids)
 
+        # If this data is shuffled, this function has already been called on all the units and
+        # stim presentation ids, so we can just grab the data from the decoder and return that
+        # with just the specified stim_ids and unit_ids
+        if self._decoders[name].is_shuffled():
+            presentationwise_counts = copy.deepcopy(self._decoders[name].single_counts)
+            presentationwise_counts = presentationwise_counts.sel(stimulus_presentation_id=stimulus_presentation_ids, unit_id=unit_ids)
+            return presentationwise_counts
+        
         # Initialize the return array
         presentationwise_counts = np.zeros((num_presentations, num_bins, num_units), dtype=int)
 
@@ -1104,7 +1127,7 @@ class SessionProcessor:
         # all into one array (with the original class presentation ordering given by
         # stim_presentation_order)
         presentation_idx = 0
-        psths = np.zeros((num_presentations, num_bins, num_units))
+        psths = np.zeros((num_presentations, num_bins, num_units), dtype=int)
         for presentation_class in stim_presentation_order:
             # Get the psth stack for this class
             current_class_psth = presentations_by_class[presentation_class]
@@ -1117,7 +1140,26 @@ class SessionProcessor:
             counts[presentation_class] += 1
             presentation_idx += 1
 
-        return psths
+        # Adjust the bin labels to be the center between the edges
+        bin_centers = np.zeros(num_bins)
+        for k in range(1, num_bins+1):
+            bin_centers[k-1] = (bin_edges[k] - bin_edges[k-1])/2 + bin_edges[k-1]
+        
+        #return psths
+        return xarray.DataArray(
+            data=psths,
+            dims=[
+                "stimulus_presentation_id",
+                "time_relative_to_stimulus_onset",
+                "unit_id",
+            ],
+            coords=dict(
+                stimulus_presentation_id=(["stimulus_presentation_id"], stim_ids),
+                time_relative_to_stimulus_onset=(["time_relative_to_stimulus_onset"], bin_centers),
+                unit_id=(["unit_id"], np.int64(self.all_units)),
+            ),
+            #name="burst_counts",
+        )
 
     def _correlate(self, x1, x2):
         """Brief summary of what this function does.

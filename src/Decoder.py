@@ -47,10 +47,11 @@ class Decoder:
         classifier,
         stimulus_type,
         stim_table,
-        stim_modalities,
+        stimulus_conditions,
         bin_edges,
         x,
         y,
+        is_shuffled,
         name="",
     ) -> None:
         """Create a new Decoder
@@ -67,10 +68,11 @@ class Decoder:
         self.classifier = classifier
         self.stimulus_type = stimulus_type
         self.stim_table = stim_table
-        self.stim_modalities = stim_modalities
+        self.stimulus_conditions = stimulus_conditions
         self.bin_edges = bin_edges
         self.x = x
         self.y = y
+        self.shuffled = is_shuffled
         if name == "":
             name = copy.deepcopy(stimulus_type)
         self.name = name
@@ -125,7 +127,7 @@ class Decoder:
             self.classifier,
             self.stimulus_type,
             self.stim_table,
-            self.stim_modalities,
+            self.stimulus_conditions,
             self.bin_edges,
             self.x,
             self.y,
@@ -201,12 +203,13 @@ class Decoder:
         return
 
     def add_bursts(
-        self, whole_burst_dict, whole_single_dict, burst_counts, single_counts
+        self, whole_burst_dict, whole_single_dict, burst_counts, single_counts, is_shuffled
     ):
         self.whole_burst_dict = whole_burst_dict
         self.whole_single_dict = whole_single_dict
         self.burst_counts = burst_counts
         self.single_counts = single_counts
+        self.shuffled = is_shuffled
         return
 
     # def add_burst_weights(self, burst_weights, single_weights):
@@ -237,3 +240,6 @@ class Decoder:
 
     def has_singles(self) -> bool:
         return self.whole_single_dict is not None
+    
+    def is_shuffled(self) -> bool:
+        return self.shuffled
