@@ -87,9 +87,8 @@ class SessionProcessor:
         # All the units in one convenient spot
         self.all_units = []
         for acronym in session.structure_acronyms:
-            start = len(
-                self.all_units
-            )  # Because self.all_units is constantly growing, this will change every iteration
+            # Because self.all_units is constantly growing, this will change every iteration
+            start = len(self.all_units)
             current = list(
                 session.units[session.units.ecephys_structure_acronym == acronym].index
             )
@@ -248,8 +247,25 @@ class SessionProcessor:
 
         # Generate the histograms
         histograms = {}
-        histograms["whole"] = self.session.presentationwise_spike_counts(
-            bins, stim_presentation_ids, self.all_units
+
+        # The allensdk version of the presentationwise function cannot take shuffling
+        # into account, so we need to manually shuffle the whole psth if the data is
+        # shuffled. The processor's presentationwise functions take shuffling into
+        # account, so the same check doesn't need to be made for the burst and
+        # single spike psths
+        histograms["whole"] = (
+            self._shuffle_trials(
+                bins,
+                stim_presentation_ids,
+                y,
+                stim_modalities,
+                name,
+                self._presentationwise_spike_counts,
+            )
+            if self._decoders[name].is_shuffled()
+            else self.session.presentationwise_spike_counts(
+                bins, stim_presentation_ids, self.all_units
+            )
         )
         histograms["bursts"] = (
             self.presentationwise_burst_counts(
@@ -274,23 +290,33 @@ class SessionProcessor:
 
         # For each possible stimulus condition
         for stim in stim_modalities:
+            # self._check_membership(members, arr) returns a boolean array
+            # new_arr of length len(arr) -> new_arr[k] = arr[k] in members
+
             # Generate the histograms
-            whole_modality_histograms[
-                stim
-            ] = self.session.presentationwise_spike_counts(
-                bins, modality_indicies[stim], self.all_units
-            )
-            burst_modality_histograms[stim] = (
-                self.presentationwise_burst_counts(
-                    name, bins, modality_indicies[stim], self.all_units
+            whole_modality_histograms[stim] = histograms["whole"].loc[
+                self._check_membership(
+                    modality_indicies[stim],
+                    histograms["whole"].stimulus_presentation_id,
                 )
+            ]
+            burst_modality_histograms[stim] = (
+                histograms["bursts"].loc[
+                    self._check_membership(
+                        modality_indicies[stim],
+                        histograms["bursts"].stimulus_presentation_id,
+                    )
+                ]
                 if self._decoders[name].has_bursts()
                 else None
             )
             single_modality_histograms[stim] = (
-                self.presentationwise_non_burst_counts(
-                    name, bins, modality_indicies[stim], self.all_units
-                )
+                histograms["singles"].loc[
+                    self._check_membership(
+                        modality_indicies[stim],
+                        histograms["singles"].stimulus_presentation_id,
+                    )
+                ]
                 if self._decoders[name].has_singles()
                 else None
             )
@@ -300,7 +326,7 @@ class SessionProcessor:
         modality_histograms["bursts"] = burst_modality_histograms
         modality_histograms["singles"] = single_modality_histograms
         self._modality_histograms[name] = modality_histograms
-        return
+        return (self._histograms, self._modality_histograms)
 
     def calculate_decoder_weights(
         self, name, test_size=0.2, cv_accuracy_scoring=False, cv_count=5
@@ -669,7 +695,9 @@ class SessionProcessor:
             bins = bin_edges
 
             num_presentations, num_bins, num_units = x.shape
-            num_units = len(unit_ids)
+            if type(unit_ids) != np.ndarray:
+                unit_ids = np.array(unit_ids)
+            num_units = unit_ids.size
 
         # If this data is shuffled, this function has already been called on all the units and
         # stim presentation ids, so we can just grab the data from the decoder and return that
@@ -688,9 +716,8 @@ class SessionProcessor:
 
         # Walk through each bin, and check if any of the beg times are in it. If they are,
         # presentationwise_counts[presentation_id, bin_num, unit_id] += 1
-        # unit_idx = 0
-        # for unit_id, bursts in burst_dict.items():
-        for unit_id, unit_idx in zip(unit_ids, range(num_units)):
+        unit_idx = 0
+        for unit_id in unit_ids:
             bursts = burst_dict[unit_id]
             if bursts is not None:
                 # Initialize the "next bin" to be the first bin
@@ -732,7 +759,7 @@ class SessionProcessor:
                         presentation_idx, num_bins - 1, unit_idx
                     ] += 1
 
-        #    unit_idx += 1
+            unit_idx += 1
 
         # Take out any stim presentations not in stim_presentation_ids
         indices_to_keep = (
@@ -872,7 +899,9 @@ class SessionProcessor:
             bins = bin_edges
 
             num_presentations, num_bins, num_units = x.shape
-            num_units = len(unit_ids)
+            if type(unit_ids) != np.ndarray:
+                unit_ids = np.array(unit_ids)
+            num_units = unit_ids.size
 
         # If this data is shuffled, this function has already been called on all the units and
         # stim presentation ids, so we can just grab the data from the decoder and return that
@@ -891,9 +920,8 @@ class SessionProcessor:
 
         # Walk through each bin, and check if any of the spike times are in it. If they are,
         # presentationwise_counts[presentation_id, bin_num, unit_id] += 1
-        # unit_idx = 0
-        # for unit_id, singles in single_dict.items():
-        for unit_id, unit_idx in zip(unit_ids, range(num_units)):
+        unit_idx = 0
+        for unit_id in unit_ids:
             singles = single_dict[unit_id]
             if singles is not None:
                 # Initialize the "next bin" to be the first bin
@@ -934,7 +962,7 @@ class SessionProcessor:
                     presentationwise_counts[
                         presentation_idx, num_bins - 1, unit_idx
                     ] += 1
-            # unit_idx += 1
+            unit_idx += 1
 
         # Take out any stim presentations not in stim_presentation_ids
         indices_to_keep = (
@@ -1142,15 +1170,15 @@ class SessionProcessor:
         # For each stimulus condition (e.g. each presentation angle)
         for stim_class in stim_classes:
             class_presentation_indicies = []
-            
+
             # Used later when collecting shuffled presentations in order
             counts[stim_class] = 0
-            
+
             # Collect the indicies for each presentation of that class
             for k in range(num_presentations):
                 if stim_class == stim_presentation_order[k]:
                     class_presentation_indicies = class_presentation_indicies + [k]
-                    
+
             # Get all of the activity counts for this stimulus condition
             presentations_by_class[stim_class] = np.array(
                 presentationwise_function(
@@ -1390,3 +1418,9 @@ class SessionProcessor:
         for key in keys:
             empty_dict[key] = np.zeros(array_size)
         return empty_dict
+
+    def _check_membership(self, members, arr_to_check):
+        arr_mask = np.zeros(arr_to_check.shape, dtype=bool)
+        for k in range(len(arr_mask)):
+            arr_mask[k] = arr_to_check[k] in members
+        return arr_mask
