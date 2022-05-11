@@ -203,7 +203,12 @@ class Decoder:
         return
 
     def add_bursts(
-        self, whole_burst_dict, whole_single_dict, burst_counts, single_counts, is_shuffled
+        self,
+        whole_burst_dict,
+        whole_single_dict,
+        burst_counts,
+        single_counts,
+        is_shuffled,
     ):
         self.whole_burst_dict = whole_burst_dict
         self.whole_single_dict = whole_single_dict
@@ -240,6 +245,6 @@ class Decoder:
 
     def has_singles(self) -> bool:
         return self.whole_single_dict is not None
-    
+
     def is_shuffled(self) -> bool:
         return self.shuffled
