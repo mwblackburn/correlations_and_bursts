@@ -1,4 +1,4 @@
-name: Python37
+name: correlations_and_bursts_env
 channels:
   - r
   - defaults
@@ -523,4 +523,4 @@ dependencies:
     - tzlocal==4.1
     - xarray==0.15.1
     - yarl==1.7.2
-prefix: C:\Users\Demogorgon\anaconda3\envs\Python37
+prefix: C:\Users\Demogorgon\anaconda3\envs\correlations_and_bursts_env

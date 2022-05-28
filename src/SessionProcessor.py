@@ -12,7 +12,7 @@ from sklearn.svm import LinearSVC
 from sklearn import metrics
 from scipy.stats import pearsonr as pearson_correlation
 
-from src.Decoder import Decoder
+from src.Decoder import DataInstance
 
 # import allensdk.brain_observatory.ecephys.ecephys_session
 
@@ -184,7 +184,7 @@ class SessionProcessor:
         x = np.array(x)
 
         # Construct the decoder
-        self._decoders[name] = Decoder(
+        self._decoders[name] = DataInstance(
             classifier,
             stimulus_type,
             stim_table,

@@ -5,7 +5,7 @@ import copy
 # That can (and will) change as the package comes together more
 
 
-class Decoder:
+class DataInstance:
     """One line summary of Decoder
     
     More in depth description of Decoder
