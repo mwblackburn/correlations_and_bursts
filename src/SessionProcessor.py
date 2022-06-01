@@ -300,26 +300,24 @@ class SessionProcessor:
                     histograms["whole"].stimulus_presentation_id,
                 )
             ]
-            burst_modality_histograms[stim] = (
-                histograms["bursts"].loc[
-                    self._check_membership(
-                        modality_indicies[stim],
-                        histograms["bursts"].stimulus_presentation_id,
-                    )
-                ]
-                if self._decoders[name].has_bursts()
-                else None
-            )
-            single_modality_histograms[stim] = (
-                histograms["singles"].loc[
-                    self._check_membership(
-                        modality_indicies[stim],
-                        histograms["singles"].stimulus_presentation_id,
-                    )
-                ]
-                if self._decoders[name].has_singles()
-                else None
-            )
+            if self._decoders[name].has_bursts():
+                burst_modality_histograms[stim] = (
+                    histograms["bursts"].loc[
+                        self._check_membership(
+                            modality_indicies[stim],
+                            histograms["bursts"].stimulus_presentation_id,
+                        )
+                    ]
+                )
+            if self._decoders[name].has_singles():
+                single_modality_histograms[stim] = (
+                    histograms["singles"].loc[
+                        self._check_membership(
+                            modality_indicies[stim],
+                            histograms["singles"].stimulus_presentation_id,
+                        )
+                    ]
+                )
 
         modality_histograms = {}
         modality_histograms["whole"] = whole_modality_histograms
@@ -667,6 +665,31 @@ class SessionProcessor:
         return self.session.presentationwise_spike_times(
             stimulus_presentation_ids=stimulus_presentation_ids, unit_ids=unit_ids
         )
+
+    def presentationwise_spike_counts(self, name, bin_edges, stimulus_presentation_ids, unit_ids):
+        if not name in self._decoders.keys():
+            raise ValueError(
+                f"{name} did not match the name of any decoders constructed by this object."
+            )
+
+        #presentationwise_counts = self.session.presentationwise_spike_counts(bin_edges, stimulus_presentation_ids, unit_ids)
+        is_shuffled = self._decoders[name].is_shuffled()    
+        if is_shuffled:
+            stim_table = self._decoders[name].stim_table.reset_index(inplace=False)
+            
+            stim_presentation_order = stim_table.loc[self._check_membership(
+                            stimulus_presentation_ids,
+                            stim_table["stimulus_presentation_id"],
+                        )]
+            
+            stim_presentation_order = np.array(stim_presentation_order["orientation"])
+            stim_classes = np.unique(stim_presentation_order)
+            presentationwise_counts = self._shuffle_trials(bin_edges, stimulus_presentation_ids, stim_presentation_order, stim_classes, name, self._presentationwise_spike_counts)
+            # TODO: Name the array acordingly before it's returned
+        else:
+            presentationwise_counts = self.session.presentationwise_spike_counts(bin_edges, stimulus_presentation_ids, unit_ids)
+        
+        return presentationwise_counts
 
     def presentationwise_burst_counts(
         self, name, bin_edges, stimulus_presentation_ids, unit_ids
@@ -1160,7 +1183,7 @@ class SessionProcessor:
 
         rng = default_rng()
         num_bins = len(bin_edges) - 1
-        num_presentations = len(stim_presentation_order)
+        num_presentations = len(stim_ids)
         num_units = len(self.all_units)
 
         # Sort all the stimulus presentation ids by class so that trials are shuffled with
