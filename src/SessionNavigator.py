@@ -2,12 +2,6 @@ import os
 import copy
 from allensdk.brain_observatory.ecephys.ecephys_project_cache import EcephysProjectCache
 
-# Include functions for finding sessions, loading them
-# Data wrangler
-# Descriptive statistics module (class), correlations
-# Decoding class
-# Plotting/visualization class
-
 
 class SessionNavigator:
 

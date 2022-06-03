@@ -1,47 +1,73 @@
 import numpy as np
-import pandas as pd
 from numpy.random import default_rng
+
+import pandas as pd
 import xarray
 import copy
-
 import warnings
 
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.metrics import accuracy_score, make_scorer
-from sklearn.svm import LinearSVC
 from sklearn import metrics
+from sklearn.metrics import accuracy_score, make_scorer
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.svm import LinearSVC
 from scipy.stats import pearsonr as pearson_correlation
 
 from src.Decoder import DataInstance
-
-# import allensdk.brain_observatory.ecephys.ecephys_session
-
-
-# This is where most of the calculations on a single session are going to be performed.
-# It will:
-# construct and evaluate decoders
-# construct and evaluate PSTHs
-# construct and evaluate correlation statistics
-# save any relevant data for plots (so basically everything)
-
 
 class SessionProcessor:
     # Currently irrelevant documentation that was dificult to phrase, so I'm waiting to delete it
     # until I'm certain I wont need it
     #        The indices for the beginning of each region's unit ID numbers is held in
     #    _all_unit_dividing_indicies
-    """One line summary of SessionProcessor
+    """A proccessing aid for single Session obejcts from the AllenSDK Neuropixels dataset.
 
     More in depth description of SessionProcessor
 
     Methods
+    
     _______
-    construct_decoder(LIST_ALL_ARGS)
-        Description of construct_decoder
-    construct_psth(LIST_ALL_ARGS)
-        Description of construct_psth
-    etc.
+    
+    __init__(AllenSDK_Session)
+        Initializes an instance of `SessionProcessor`, with the provided AllenSDK session.
+        
+    construct_decoder(stimulus_type, stimulus_characteristic, **kwargs)
+        Creates a `DataInstance` of the AllenSDK_Session acording to the supplied arguments.
+        Returns the `name` associated with the created `DataInstance`. This `name` acts as 
+        the key for the `DataInstance` value.
+        
+    construct_psth(name)
+        Prepairs all the data in `name`'s `DataInstance`, including shuffling data if specified.
+        
+    calculate_decoder_weights(name, **kwargs)
+        Trains and assesses classifiers from `name`s `DataInstance`.
+        Must be called after construct_psth(name) is called.
+        
+    calculate_correlations(name)
+        Calculates the correlation between the weights from the classifiers (trained in calculate_decoder_weights())
+        and the activity in the neuronal training data for those classifiers (from the AllenSDK_Session)
+        
+    add_bursts(burst_dict, single_dict, name)
+        DESCRIBE ME
+        
+    presentationwise_spike_counts(name, bin_edges, stimulus_presentation_ids, unit_ids)
+        DESCRIBE ME
+    
+    presentationwise_burst_counts(name, bin_edges, stimulus_presentation_ids, unit_ids)
+        DESCRIBE ME
 
+    presentationwise_burst_times(name, stimulus_presentation_ids, unit_ids)
+        DESCRIBE ME
+    
+    presentationwise_non_burst_counts(name, bin_edges, stimulus_presentation_ids, unit_ids)
+        DESCRIBE ME
+
+    presentationwise_non_burst_times(name, stimulus_presentation_ids, unit_ids)
+        DESCRIBE ME
+    
+    results()
+        DESCRIBE ME
+
+    
     Attributes
     __________
     session : EcephysSession
@@ -57,22 +83,21 @@ class SessionProcessor:
 
     # TODO: Doc me
 
-    def __init__(self, session):
-        """Create a new SessionProcessor
-
-        Note
-        ____
-        Maybe theres something to note?
+    def __init__(self, AllenSDK_Session):
+        """Create a new `SessionProcessor`
 
         Parameters
+        
         __________
+
+        
         session : EcephysSession
-            The EcephysSession to be processed.
+            The AllenSDK EcephysSession to be processed.
 
         """
 
         # Set the internal session and id number
-        self.session = session
+        self.session = AllenSDK_Session
         self._session_id = self.session.ecephys_session_id
 
         # Organize the session units by location
@@ -86,11 +111,11 @@ class SessionProcessor:
 
         # All the units in one convenient spot
         self.all_units = []
-        for acronym in session.structure_acronyms:
+        for acronym in AllenSDK_Session.structure_acronyms:
             # Because self.all_units is constantly growing, this will change every iteration
             start = len(self.all_units)
             current = list(
-                session.units[session.units.ecephys_structure_acronym == acronym].index
+                AllenSDK_Session.units[AllenSDK_Session.units.ecephys_structure_acronym == acronym].index
             )
 
             self.units_by_acronym[acronym] = current
@@ -109,13 +134,10 @@ class SessionProcessor:
 
         return
 
-    # In theory, you could cause a bug here by calling this twice, with the same stim and bin
-    # width, but different start and stop times. Right now, this issue is addressed with an
-    # exception (ValueError)
     def construct_decoder(
         self,
-        stimulus_type,
-        stimulus_characteristic,
+        stimulus_type: str,
+        stimulus_characteristic: str,
         name="",
         bin_start=0.0,
         bin_stop=0.0,
@@ -127,16 +149,54 @@ class SessionProcessor:
     ) -> str:
         """Collects all the data needed to decode stimuli from the neural activity in self.session.
 
-        Note
-        ____
-        There's probably something to note here
 
         Parameters
+        
         __________
 
+        stimulus_type : str
+            The stimulus epoch, e.g. "drifting_gratings_contrast"
+        
+        stimulus_characteristic : str
+            The characteristic of the stimulus that is to be predicted from the neural data, e.g. "orientation"
+            
+        name : str
+            The name (key) to be associated with the `DataInstance` created after this function returns.
+            If no name is provided, the most descriptive name possible is defaulted using information from other parameters (recommended).
+            
+        bin_start : float, default=0.0
+            Where to start binning spike times, relative to stimulus onset. Measured in seconds.
+            
+        bin_stop : float
+            Where to stop binning spike times, relative to stimulus onset. Measured in seconds.
+            If no value is provided, the mean stimulus durration is used.
+            
+        bin_width : float, default=0.05
+            The width of each bin between bin_start and bin_stop. Implicitly determines the number of bins. Measured in seconds.
+            
+        classifier : Any scikit-learn compatible classifier, default=LinearSVC()
+            The classifier eventually to be trained. Can (and likely should) be pre-loaded with hyperparameters.
+            
+        burst_dict : dict, default=None
+            The dictionary of previously detected bursts. See BurstDetection.ipynb for more information.
+            If a burst_dict is provided, the add_bursts() function is irrelevant.
+            
+        single_dict : dict, default=None
+            The dictionary of previously detected non-bursts ("singles"). See BurstDetection.ipynb for more information.
+            If a single_dict is provided, the add_bursts() function is irrelevant (as singles dicts are assumed to always be
+            associated with a burst dict).
+
+        shuffle_trials : bool, default=False
+            Whether to shuffle the classifier's training data to destroy noise correlations. This shuffling only affects the `DataInstance`
+            created after this function returns, data in other `DataInstance`s is unaffected.
+            
 
         Returns
+        
         _______
+        
+        name : str
+            The name associated with the newly created `DataInstance`.
 
         """
         # If a name wasn't provided, name the decoder as explicitly as possible
@@ -210,19 +270,27 @@ class SessionProcessor:
     # construct the psths. You could then pretty easily associate a set of psths with
     # a specific decoder
     def construct_psth(self, name):
-        """Brief summary of what this function does.
-
-        Note
-        ____
-        There's probably something to note here
+        """Constructs the stimulus response tables (erroneously labeled "PSTH"s) for `name`'s `DataInstance`. Preserves shuffling if `name` is associated with a shuffled `DataInstance`.
 
         Parameters
+        
         __________
 
+        name : str
+            The name associated with the desired `DataInstance`.
 
         Returns
+        
         _______
 
+        response_tables : dict
+            All of the stimulus response tables constructed by this function.
+            Keys: {"whole", "bursts", "singles"}
+
+        stimulus_class_response_tables : dict
+            All the stimulus response tables constructed by this function, sorted by stimulus class/condition (e.g. 90 degree presentation angle).
+            Keys: {"whole", "bursts", "singles"}
+            Subkeys are the stimulus conditions themselves (e.g. {0.0, 45.0, 90.0})
         """
         if not name in self._decoders.keys():
             raise ValueError(
@@ -329,18 +397,25 @@ class SessionProcessor:
     def calculate_decoder_weights(
         self, name, test_size=0.2, cv_accuracy_scoring=False, cv_count=5
     ):
-        """Brief summary of what this function does.
+        """Train the classifier in `name`'s `DataInstance` and record the calculated weights.
 
-        Note
-        ____
-        There's probably something to note here
 
         Parameters
+
         __________
 
+        name : str
+            The name associated with the desired `DataInstance`.
+            
+        test_size : float, default=0.2
+            The proportion of data held out for testing.
+            
+        cv_accuracy_scoring : bool, default=False
+            Use cross validation for accuracy scoring. This returns substantially better assessments of accuracy, but at the cost of increased runtime.
+            
+        cv_count : int, default=5
+            The number of cross validations for each trained classifier. Unused if cv_accuracy_scoring is False.
 
-        Returns
-        _______
 
         """
         # Check that the decoder exists, unpack it's information
@@ -365,6 +440,7 @@ class SessionProcessor:
             cv_accuracy_scores = {}
         else:
             cv_accuracy_scores = None
+            cv_count = 0
 
         # Collect the decoding inputs (whole spike trains, along with bursts and singles if available)
         data_dict = {}
@@ -404,29 +480,54 @@ class SessionProcessor:
         return
 
     def _calculate_decoder_weights(
-        self, data, labels, stim_modalities, classifier, test_size, cv_count,
+        self, data, labels, stim_conditions, classifier, test_size, cv_count,
     ):
-        """Brief summary of what this function does.
+        """The actual function that trains the classifiers (called by the wrapper calculate_decoder_weights()).
 
-        Note
-        ____
-        There's probably something to note here
 
         Parameters
+        
         __________
 
+        data : ndarray
+            The training data for the classifier.
+            
+        labels : ndarray
+            The labels for the data.
+            
+        stim_conditions : ndarray
+            The stimulus condtions (every possible label value, e.g. [0.0, 45.0, 90.0]).
+            
+        classifier : Any scikit-learn compatible classifier
+            The classifier to be trained.
+            
+        test_size : float
+            The proportion of data held out for testing.
+
+        cv_count : int
+            The number of cross validations for each trained classifier. Ignored if less than or equal to 1.
 
         Returns
+        
         _______
 
+        weights_by_condition : dict
+            The trained decoder weights, organized by stimulus condition.
+        
+        weights_by_bin : dict
+            The trained decoder weights, organized by time bin.
+        
+        weights_by_cell : dict
+            The trained decoder weights, organized by cell.
+        
+        accuracies_by_bin : dict
+            The default accuracy scores, sorted by time bin.
+            
+        thorough_accuracy_scores : dict
+            The cross validated accuracy scores, sorted by time bin. (None if cv_count <= 1)
         """
-        # TODO: Add burst, non burst, and 2 channel functionality
-        # General plan: Check that bursts and singles are present
-        # If they are: do everything identically
-        # Solution: make this function a wrapper function that
-        # passes the x and y data directly, so that it can be
-        # called with x=bursts, then called again with x=singles,
-        # and so on
+        # TODO: Add 2 channel functionality
+
         if cv_count > 1:
             thorough_accuracy_scores = {}
         else:
@@ -438,10 +539,10 @@ class SessionProcessor:
 
         # Initialize everything
         weights_by_modality = self._initialize_dict(
-            stim_modalities, (num_bins, num_units)
+            stim_conditions, (num_bins, num_units)
         )
         weights_by_cell = self._initialize_dict(
-            self.all_units, (num_bins, len(stim_modalities))
+            self.all_units, (num_bins, len(stim_conditions))
         )
         weights_by_bin = {}
         accuracies_by_bin = {}
@@ -486,7 +587,7 @@ class SessionProcessor:
         unit_idx = 0
         for unit_id in self.all_units:
             modality_idx = 0
-            for stim in stim_modalities:
+            for stim in stim_conditions:
                 # The modality_idx^th column of that particular cell, which should be every time bin
                 # for the stimulus modality indicated by the stim
                 weights_by_cell[unit_id][:, modality_idx] = weights_by_modality[stim][
@@ -503,18 +604,16 @@ class SessionProcessor:
         )
 
     def calculate_correlations(self, name):
-        """Brief summary of what this function does.
+        """Calculate the pearson correlation between the activity of the neurons (in `name`'s `DataInstance`) and the decoder weights trained from the same `DataInstance`.
 
-        Note
-        ____
-        There's probably something to note here
 
         Parameters
+        
         __________
 
+        name : str
+            The name associated with the desired `DataInstance`.
 
-        Returns
-        _______
 
         """
         if not name in self._decoders.keys():
@@ -587,13 +686,25 @@ class SessionProcessor:
         return
 
     def add_bursts(self, burst_dict, single_dict, name, shuffled=False):
-        # TODO: Its probably a good idea to check `name` for the words "shuffled" or "unshuffled"
-        # and shuffle the bursts based on that (keep the `shuffled` bool so that names can still
-        # be user defined)
-        # TODO: Clarify in the documentation that if you wan't to change the time bins for a
-        # shuffled trial, you have to make a whole new decoder with those specified bins
-        # (emphasize that you do not need to make another processor, call
-        # construction_decoder again with the specified bins)
+        """Calculate the pearson correlation between the activity of the neurons (in `name`'s `DataInstance`) and the decoder weights trained from the same `DataInstance`.
+
+
+        Parameters
+        
+        __________
+        
+        burst_dict : dict
+            The dictionary of previously detected bursts. See BurstDetection.ipynb for more detail.
+            
+        single_dict : dict
+            The dictionary of previously detected non-bursts (singles). See BurstDetection.ipynb for more detail.
+
+        name : str
+            The name associated with the desired `DataInstance`.
+
+        shuffled : bool, default=False
+        
+        """
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
@@ -655,6 +766,7 @@ class SessionProcessor:
     def _presentationwise_spike_counts(
         self, name, bin_edges, stimulus_presentation_ids, unit_ids
     ):
+        """Wrapper function for the AllenSDK presentationwise_spike_counts function."""
         return self.session.presentationwise_spike_counts(
             bin_edges=bin_edges,
             stimulus_presentation_ids=stimulus_presentation_ids,
@@ -662,11 +774,42 @@ class SessionProcessor:
         )
 
     def _presentationwise_spike_times(self, name, stimulus_presentation_ids, unit_ids):
+        """Wrapper function for the AllenSDK presentationwise_spike_times function."""
         return self.session.presentationwise_spike_times(
             stimulus_presentation_ids=stimulus_presentation_ids, unit_ids=unit_ids
         )
 
     def presentationwise_spike_counts(self, name, bin_edges, stimulus_presentation_ids, unit_ids):
+        """This function is close to identical to the one provided in the AllenSDK. However, this version preserves shuffling if `name`'s `DataInstance` is shuffled.
+
+
+        Parameters
+        
+        __________
+
+        name : str
+            The name associated with the desired `DataInstance`.
+            
+        bin_edges : ndarray
+            The edges of the time bins for the counts.
+            
+        stimulus_presentation_ids : ndarray
+            The id numbers specifying which responses to stimuli should be included.
+            
+        unit_ids : ndarray
+            The id numbers specifying which units' (cells') responses should be included.
+            
+
+        Returns
+        
+        _______
+
+        presentationwise_counts : XArray DataArray
+            The binned spike counts for each specified stimulus on each specified unit (cell).
+            shape: (num_stim_presentations, num_bins, num_units)
+
+        """
+        
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
@@ -685,7 +828,7 @@ class SessionProcessor:
             stim_presentation_order = np.array(stim_presentation_order["orientation"])
             stim_classes = np.unique(stim_presentation_order)
             presentationwise_counts = self._shuffle_trials(bin_edges, stimulus_presentation_ids, stim_presentation_order, stim_classes, name, self._presentationwise_spike_counts)
-            # TODO: Name the array acordingly before it's returned
+            presentationwise_counts.name = "spike_counts"
         else:
             presentationwise_counts = self.session.presentationwise_spike_counts(bin_edges, stimulus_presentation_ids, unit_ids)
         
@@ -694,8 +837,43 @@ class SessionProcessor:
     def presentationwise_burst_counts(
         self, name, bin_edges, stimulus_presentation_ids, unit_ids
     ):
-        # TODO: Clarify in the documentation for this function that a burst might straddle bin edges,
-        # so bursts are considered to be inside the bin they start in, regardless of where they end
+        """This function is close to identical to the analogous version provided in the AllenSDK. However, this version counts exclusively bursts and preserves shuffling if `name`'s `DataInstance` is shuffled.
+
+        Note
+        
+        ____
+        
+        1. A burst may "straddle" a time bin (begin inside a time bin, but end in the next time bin).
+        Such bins are counted in the bin they begin, regardless of where they end.
+        
+        2. The number of bursts is counted, not the number of spikes in the bursts.
+        
+        Parameters
+        
+        __________
+
+        name : str
+            The name associated with the desired `DataInstance`.
+            
+        bin_edges : ndarray
+            The edges of the time bins for the counts.
+            
+        stimulus_presentation_ids : ndarray
+            The id numbers specifying which responses to stimuli should be included.
+            
+        unit_ids : ndarray
+            The id numbers specifying which units' (cells') responses should be included.
+            
+
+        Returns
+        
+        _______
+
+        presentationwise_counts : XArray DataArray
+            The binned burst counts for each specified stimulus on each specified unit (cell).
+            shape: (num_stim_presentations, num_bins, num_units)
+
+        """
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
@@ -821,8 +999,30 @@ class SessionProcessor:
         )
 
     def presentationwise_burst_times(self, name, stimulus_presentation_ids, unit_ids):
-        # TODO: Clarify in the documentation of this function (and the non_burst version)
-        # that there is no shuffling supported by this function at all
+        """This function is close to identical to the analogous version in the AllenSDK. However, this version reports exclusively burst times and DOES NOT PRESERVE SHUFFLING.
+        
+        Parameters
+        
+        __________
+
+        name : str
+            The name associated with the desired `DataInstance`.
+            
+        stimulus_presentation_ids : ndarray
+            The id numbers specifying which responses to stimuli should be included.
+            
+        unit_ids : ndarray
+            The id numbers specifying which units' (cells') responses should be included.
+            
+
+        Returns
+        
+        _______
+
+        presentationwise_times : Pandas DataFrame
+            DataFrame Columns: absolute_beg_time, absolute_end_time, relative_beg_time, relative_end_time, stimulus_presentation_id, unit_id
+
+        """
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
@@ -898,6 +1098,44 @@ class SessionProcessor:
     def presentationwise_non_burst_counts(
         self, name, bin_edges, stimulus_presentation_ids, unit_ids
     ):
+        """This function is close to identical to the analogous version provided in the AllenSDK. However, this version counts exclusively non-bursts (singles) and preserves shuffling if `name`'s `DataInstance` is shuffled.
+
+        Note
+        
+        ____
+        
+        1. A burst may "straddle" a time bin (begin inside a time bin, but end in the next time bin).
+        Such bins are counted in the bin they begin, regardless of where they end.
+        
+        2. The number of bursts is counted, not the number of spikes in the bursts.
+        
+        Parameters
+        
+        __________
+
+        name : str
+            The name associated with the desired `DataInstance`.
+            
+        bin_edges : ndarray
+            The edges of the time bins for the counts.
+            
+        stimulus_presentation_ids : ndarray
+            The id numbers specifying which responses to stimuli should be included.
+            
+        unit_ids : ndarray
+            The id numbers specifying which units' (cells') responses should be included.
+            
+
+        Returns
+        
+        _______
+
+        presentationwise_counts : XArray DataArray
+            The binned non-burst (single) counts for each specified stimulus on each specified unit (cell).
+            shape: (num_stim_presentations, num_bins, num_units)
+
+        """
+        
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
@@ -1026,6 +1264,30 @@ class SessionProcessor:
     def presentationwise_non_burst_times(
         self, name, stimulus_presentation_ids, unit_ids
     ):
+        """This function is close to identical to the analogous version in the AllenSDK. However, this version reports exclusively non-burst (single) times and DOES NOT PRESERVE SHUFFLING.
+        
+        Parameters
+        
+        __________
+
+        name : str
+            The name associated with the desired `DataInstance`.
+            
+        stimulus_presentation_ids : ndarray
+            The id numbers specifying which responses to stimuli should be included.
+            
+        unit_ids : ndarray
+            The id numbers specifying which units' (cells') responses should be included.
+            
+
+        Returns
+        
+        _______
+
+        presentationwise_times : Pandas DataFrame
+            DataFrame Columns: absolute_spike_time, relative_spike_time, stimulus_presentation_id, unit_id
+
+        """
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
@@ -1092,40 +1354,22 @@ class SessionProcessor:
 
         return presentationwise_times
 
-    # TODO: Implement the below functions
-    def save(self, path=""):
-        """Brief summary of what this function does.
-
-        Note
-        ____
-        There's probably something to note here
-
-        Parameters
-        __________
-
-
-        Returns
-        _______
-
-        """
-        pass
-
     def results(self):
-        """Brief summary of what this function does.
+        """Returns the results from the analyses done on every `DataInstance` initialized by this `SessionProcessor`.
 
         Note
+        
         ____
-        There's probably something to note here
-
-        Parameters
-        __________
-
+        
+        The keys "psths" and "class_psths" are erroneously named. A better description would be "response_tables".
 
         Returns
+
         _______
 
+        results : dict
+            Keys: "decoder", "psths", "class_psths", "cell_correlation_matrices", "within_class_correlations"
         """
-        # TODO: There will be other things that need checking (make sure proper calls have been made, etc.)
         # if self._results is not None:
         #    return self._results
 
@@ -1161,18 +1405,41 @@ class SessionProcessor:
         name,
         presentationwise_function,
     ):
-        """Brief summary of what this function does.
-
-        Note
-        ____
-        There's probably something to note here
+        """Shuffles the unit responses (counts inside the specified bins) with other responses from the same unit, with the same stimulus condition/class.
 
         Parameters
+        
         __________
 
-
+        bin_edges : ndarray
+            The edges of the time bins for the counts.
+            
+        stim_ids : ndarray
+            The id numbers specifying which responses to stimuli should be included.
+            
+        stim_presentation_order : ndarray
+            smth
+        
+        stim_classes : ndarray
+            The stimulus conditions/classes (every possible label value, e.g. [0.0, 45.0, 90.0]).
+            
+        name : str
+            The name associated with the desired `DataInstance`.
+            
+        presentationwise_function : function
+            Which presentationwise function to call when collecting responses.
+            Can be one of:
+            self._presentationwise_spike_counts
+            self.presentationwise_burst_counts
+            self.presentationwise_non_burst_counts
+            
         Returns
+        
         _______
+        
+        
+        shuffled_responses : XArray DataArray
+            Has the exact same structure as what is returned from any "presentationwise_counts" function, except the responses are shuffled.
 
         """
 
@@ -1250,7 +1517,7 @@ class SessionProcessor:
                 k - 1
             ]
 
-        # return psths
+        # return response tables
         return xarray.DataArray(
             data=psths,
             dims=[
@@ -1266,23 +1533,28 @@ class SessionProcessor:
                 ),
                 unit_id=(["unit_id"], np.int64(self.all_units)),
             ),
-            # name="burst_counts",
         )
 
     def _correlate(self, x1, x2):
-        """Brief summary of what this function does.
-
-        Note
-        ____
-        There's probably something to note here
+        """Calculates the average pearson correlation coefficient between every row of x1, and the whole of x2.
+        x1 is assumed to be two dimensional, and x2 is assumed to be one dimensional
 
         Parameters
+        
         __________
+        x1 : ndarray
+            The two dimensional array. Correlations will be calculated with every row if this argument.
+            
+        x2 : ndarray
+            The one dimensional array. The correlation between this entire array, and every row of x1 is calculated.
 
 
         Returns
         _______
-
+        
+        mean_rowwise_correlation : float
+            The mean of the correlation coefficients between every row of x1, and the entirity of x2.
+        
         """
         warnings.filterwarnings("ignore")
 
@@ -1294,20 +1566,7 @@ class SessionProcessor:
         return np.nanmean(correlations)
 
     def _organize_histograms(self, histograms, cell_idx):
-        """Brief summary of what this function does.
-
-        Note
-        ____
-        There's probably something to note here
-
-        Parameters
-        __________
-
-
-        Returns
-        _______
-
-        """
+        """Converts a dict of histograms (key, val) to an ndarray (shape: num_time_bins, num_stimulus_conditions)."""
         keys = list(histograms.keys())
         num_bins = histograms[keys[0]].shape[0]
 
