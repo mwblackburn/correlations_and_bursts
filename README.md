@@ -46,7 +46,7 @@ and rpy2 (2.9.5). This can be finicky, and it may take some work to get rpy2 to 
 ```
 Only one path should show up, note it. I will refer to this path as `PATH`
 
-4) Open Rstudio as an administrator and run the commands in [r_admin_setup_instructions](LINK ME).
+4) Open Rstudio as an administrator and run the commands in [r_admin_setup_instructions.txt](https://github.com/mwblackburn/correlations_and_bursts/blob/main/docs/r_admin_setup_instructions.txt).
     The first command is .libPaths(). That should return multiple paths, including `PATH`.
     Then run the command .libPaths(`PATH`). That will set the package installation library to the same library that python is looking in, allowing you to install the packages needed in R to run the burst detection algorithms.
 
