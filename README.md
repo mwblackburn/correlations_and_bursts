@@ -12,9 +12,11 @@ The package is organized around the `SessionProcessor` object. `SessionProcessor
 `SessionNavigator` provides tools for finding Neuropixels sessions with specific experiment criteria.
 
 ### Burst detection
-`SessionProcessor` does not find or isolate activity bursts itself. To isolate burst-trains, use the [burst detection script provided.](https://github.com/mwblackburn/correlations_and_bursts/blob/main/scripts/Burst%20Detection.ipynb) The outputs of the script are direct inputs for `SessionNavigator`.
+`SessionProcessor` does not find or isolate activity bursts itself. To isolate burst-trains, use the [burst detection script provided.](https://github.com/mwblackburn/correlations_and_bursts/blob/main/scripts/Burst%20Detection.ipynb) The outputs of the script are direct inputs for `SessionProcessor`.
 
 ## Tutorials
+[Script controlling tutorial file paths]
+
 [Tutorial for using the package *without* incorperating burst analysis](https://github.com/mwblackburn/correlations_and_bursts/blob/main/scripts/example_analysis_functionalconnectivity.ipynb)
 
 [Tutorial for using the package with burst trains](https://github.com/mwblackburn/correlations_and_bursts/blob/main/scripts/example_analysis_with_bursts.ipynb)
@@ -27,7 +29,7 @@ The package is organized around the `SessionProcessor` object. `SessionProcessor
 
 ## Installation
 
-### Burst analyisis
+### Spike train (and burst-train) analyisis
 Installing and running the .py (burst analysis) components of this package should be as simple as downloading the package and [creating an anaconda environment from the provided .yml file.](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-from-an-environment-yml-file)
 
 ### Burst-train detection and separation
@@ -72,7 +74,7 @@ Finally, the package refered to as "sjemea" is found [here](https://github.com/s
 
 [Link to Cotterill et al.](http://jn.physiology.org/content/116/2/306)
 
-RPY2 Burst detection script written by [Peter Ledochowitsch](https://alleninstitute.org/what-we-do/brain-science/about/team/staff-profiles/peter-ledochowitsch/)
+rpy2 Burst detection script written by [Peter Ledochowitsch](https://alleninstitute.org/what-we-do/brain-science/about/team/staff-profiles/peter-ledochowitsch/)
 
 ## Authors
 Marcus Blackburn, advised by Gabriel K. Ocker, PhD

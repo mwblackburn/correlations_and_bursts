@@ -14,6 +14,7 @@ from scipy.stats import pearsonr as pearson_correlation
 
 from src.Decoder import DataInstance
 
+
 class SessionProcessor:
     # Currently irrelevant documentation that was dificult to phrase, so I'm waiting to delete it
     # until I'm certain I wont need it
@@ -115,7 +116,9 @@ class SessionProcessor:
             # Because self.all_units is constantly growing, this will change every iteration
             start = len(self.all_units)
             current = list(
-                AllenSDK_Session.units[AllenSDK_Session.units.ecephys_structure_acronym == acronym].index
+                AllenSDK_Session.units[
+                    AllenSDK_Session.units.ecephys_structure_acronym == acronym
+                ].index
             )
 
             self.units_by_acronym[acronym] = current
@@ -369,23 +372,19 @@ class SessionProcessor:
                 )
             ]
             if self._decoders[name].has_bursts():
-                burst_modality_histograms[stim] = (
-                    histograms["bursts"].loc[
-                        self._check_membership(
-                            modality_indicies[stim],
-                            histograms["bursts"].stimulus_presentation_id,
-                        )
-                    ]
-                )
+                burst_modality_histograms[stim] = histograms["bursts"].loc[
+                    self._check_membership(
+                        modality_indicies[stim],
+                        histograms["bursts"].stimulus_presentation_id,
+                    )
+                ]
             if self._decoders[name].has_singles():
-                single_modality_histograms[stim] = (
-                    histograms["singles"].loc[
-                        self._check_membership(
-                            modality_indicies[stim],
-                            histograms["singles"].stimulus_presentation_id,
-                        )
-                    ]
-                )
+                single_modality_histograms[stim] = histograms["singles"].loc[
+                    self._check_membership(
+                        modality_indicies[stim],
+                        histograms["singles"].stimulus_presentation_id,
+                    )
+                ]
 
         modality_histograms = {}
         modality_histograms["whole"] = whole_modality_histograms
@@ -779,7 +778,9 @@ class SessionProcessor:
             stimulus_presentation_ids=stimulus_presentation_ids, unit_ids=unit_ids
         )
 
-    def presentationwise_spike_counts(self, name, bin_edges, stimulus_presentation_ids, unit_ids):
+    def presentationwise_spike_counts(
+        self, name, bin_edges, stimulus_presentation_ids, unit_ids
+    ):
         """This function is close to identical to the one provided in the AllenSDK. However, this version preserves shuffling if `name`'s `DataInstance` is shuffled.
 
 
@@ -809,29 +810,39 @@ class SessionProcessor:
             shape: (num_stim_presentations, num_bins, num_units)
 
         """
-        
+
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
             )
 
-        #presentationwise_counts = self.session.presentationwise_spike_counts(bin_edges, stimulus_presentation_ids, unit_ids)
-        is_shuffled = self._decoders[name].is_shuffled()    
+        # presentationwise_counts = self.session.presentationwise_spike_counts(bin_edges, stimulus_presentation_ids, unit_ids)
+        is_shuffled = self._decoders[name].is_shuffled()
         if is_shuffled:
             stim_table = self._decoders[name].stim_table.reset_index(inplace=False)
-            
-            stim_presentation_order = stim_table.loc[self._check_membership(
-                            stimulus_presentation_ids,
-                            stim_table["stimulus_presentation_id"],
-                        )]
-            
+
+            stim_presentation_order = stim_table.loc[
+                self._check_membership(
+                    stimulus_presentation_ids, stim_table["stimulus_presentation_id"],
+                )
+            ]
+
             stim_presentation_order = np.array(stim_presentation_order["orientation"])
             stim_classes = np.unique(stim_presentation_order)
-            presentationwise_counts = self._shuffle_trials(bin_edges, stimulus_presentation_ids, stim_presentation_order, stim_classes, name, self._presentationwise_spike_counts)
+            presentationwise_counts = self._shuffle_trials(
+                bin_edges,
+                stimulus_presentation_ids,
+                stim_presentation_order,
+                stim_classes,
+                name,
+                self._presentationwise_spike_counts,
+            )
             presentationwise_counts.name = "spike_counts"
         else:
-            presentationwise_counts = self.session.presentationwise_spike_counts(bin_edges, stimulus_presentation_ids, unit_ids)
-        
+            presentationwise_counts = self.session.presentationwise_spike_counts(
+                bin_edges, stimulus_presentation_ids, unit_ids
+            )
+
         return presentationwise_counts
 
     def presentationwise_burst_counts(
@@ -1135,7 +1146,7 @@ class SessionProcessor:
             shape: (num_stim_presentations, num_bins, num_units)
 
         """
-        
+
         if not name in self._decoders.keys():
             raise ValueError(
                 f"{name} did not match the name of any decoders constructed by this object."
