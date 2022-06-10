@@ -15,7 +15,7 @@ The package is organized around the `SessionProcessor` object. `SessionProcessor
 `SessionProcessor` does not find or isolate activity bursts itself. To isolate burst-trains, use the [burst detection script provided.](https://github.com/mwblackburn/correlations_and_bursts/blob/main/scripts/Burst%20Detection.ipynb) The outputs of the script are direct inputs for `SessionProcessor`.
 
 ## Tutorials
-[Script controlling tutorial file paths]
+[Script controlling tutorial file paths](https://github.com/mwblackburn/correlations_and_bursts/blob/main/scripts/path_entry.py)
 
 [Tutorial for using the package *without* incorperating burst analysis](https://github.com/mwblackburn/correlations_and_bursts/blob/main/scripts/example_analysis_functionalconnectivity.ipynb)
 
