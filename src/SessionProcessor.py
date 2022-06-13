@@ -45,28 +45,33 @@ class SessionProcessor:
         
     calculate_correlations(name)
         Calculates the correlation between the weights from the classifiers (trained in calculate_decoder_weights())
-        and the activity in the neuronal training data for those classifiers (from the AllenSDK_Session)
+        and the activity in the neuronal training data for those classifiers (from the AllenSDK_Session).
         
     add_bursts(burst_dict, single_dict, name)
-        DESCRIBE ME
+        Adds previously detected burst trains and non-burst trains to the data associated with `name`.
         
     presentationwise_spike_counts(name, bin_edges, stimulus_presentation_ids, unit_ids)
-        DESCRIBE ME
+        This function is identical to the AllenSDK equivalent, which shares the same name, except that it preserves
+        shuffling if the data associated with `name` is shuffled.
     
     presentationwise_burst_counts(name, bin_edges, stimulus_presentation_ids, unit_ids)
-        DESCRIBE ME
+        Counts the number of bursts between the provided bin edges, for every stimulus presentation and unit specified.
+        Preserves shuffling if the data associated with `name` is shuffled.
 
     presentationwise_burst_times(name, stimulus_presentation_ids, unit_ids)
-        DESCRIBE ME
+        Returns the absolute and relative times of burst onset and offset for each stimulus presentation and unit specified.
+        DOES NOT preserve shuffling.
     
     presentationwise_non_burst_counts(name, bin_edges, stimulus_presentation_ids, unit_ids)
-        DESCRIBE ME
+        Counts the number of non-bursts between the provided bin edges, for every stimulus presentation and unit specified.
+        Preserves shuffling if the data associated with `name` is shuffled.
 
     presentationwise_non_burst_times(name, stimulus_presentation_ids, unit_ids)
-        DESCRIBE ME
+        Returns the absolute and relative times of non-burst spikes for each stimulus presentation and unit specified.
+        DOES NOT preserve shuffling.
     
     results()
-        DESCRIBE ME
+        Returns the formatted results from analyses run by this instance of SessionProcessor.
 
     
     Attributes
@@ -265,13 +270,6 @@ class SessionProcessor:
         return name
 
     # Must be called after construct_decoder is called.
-    # XXX: Maybe adjust it so that it gives a warning but constructs a default decoder
-    # with the name that was passed as an argument?
-    # BRING UP: There is a lot of redundant code here that could easily be combined with
-    # the code in "construct decoder." The easiest thing to do would be to modify this
-    # function to be private, and pass the relevant arguments to this function and
-    # construct the psths. You could then pretty easily associate a set of psths with
-    # a specific decoder
     def construct_psth(self, name):
         """Constructs the stimulus response tables (erroneously labeled "PSTH"s) for `name`'s `DataInstance`. Preserves shuffling if `name` is associated with a shuffled `DataInstance`.
 
@@ -1104,6 +1102,10 @@ class SessionProcessor:
             int
         )
 
+        # Order the columns the same as in the AllenSDK equivalent
+        # presentationwise_times = presentationwise_times[["absolute_beg_time", "absolute_end_time", "stimulus_presentation_id", "unit_id", "relative_beg_time", "relative_end_time"]]
+        # presentationwise_times.set_index("absolute_beg_time")
+
         return presentationwise_times
 
     def presentationwise_non_burst_counts(
@@ -1362,6 +1364,10 @@ class SessionProcessor:
         presentationwise_times.stimulus_presentation_id = presentationwise_times.stimulus_presentation_id.astype(
             int
         )
+
+        # Order the columns the same as in the AllenSDK equivalent
+        # presentationwise_times = presentationwise_times[["absolute_beg_time", "absolute_end_time", "stimulus_presentation_id", "unit_id", "relative_beg_time", "relative_end_time"]]
+        # presentationwise_times.set_index("absolute_beg_time")
 
         return presentationwise_times
 
